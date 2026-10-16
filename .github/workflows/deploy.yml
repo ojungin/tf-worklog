@@ -46,9 +46,10 @@ jobs:
           for f in $(ls supabase/migrations/*.sql | sort); do
             echo "apply $f"
             jq -Rs '{query: .}' "$f" > /tmp/q.json
-            curl -fsS -X POST "$API/projects/$REF/database/query" \
+            code=$(curl -sS -o /tmp/r.json -w "%{http_code}" -X POST "$API/projects/$REF/database/query" \
               -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
-              --data @/tmp/q.json > /dev/null
+              --data @/tmp/q.json)
+            if [ "$code" -ge 300 ]; then echo "::error::$f 적용 실패 (HTTP $code)"; cat /tmp/r.json; echo; exit 1; fi
           done
 
       - name: Disable public sign-up (optional)
