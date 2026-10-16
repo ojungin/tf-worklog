@@ -320,3 +320,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .catbar button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 11px;font-size:12.5px;cursor:pointer;color:var(--muted)}
 .catbar button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 :root[data-theme="dark"] .cat.c0{background:#3d2218;color:#f29a7a}:root[data-theme="dark"] .cat.c1{background:#1b2d4f;color:#8fb3f5}:root[data-theme="dark"] .cat.c2{background:#2a2145;color:#b9a0f0}:root[data-theme="dark"] .cat.c3{background:#143327;color:#6fd3a6}
+/* 보고서 본문 표 (실적) */
+.rd-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rd-tbl.wide{font-size:10.5px;letter-spacing:-.02em}
+.rd-tbl.wide th,.rd-tbl.wide td{padding:3px 3px;white-space:nowrap}
+.rd-tbl.wide td:first-child{font-weight:600}
+.re-stbl{margin-top:10px}
