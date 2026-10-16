@@ -44,18 +44,21 @@ async function fn(action,payload={}){
   if(error){let code='';try{code=(await error.context.json()).error}catch{}throw new Error(ERR[code]||('서버 처리 실패'+(code?` (${code})`:'')))}
   return data;
 }
-async function fetchAll(t){let out=[],from=0;for(;;){const{data,error}=await sb.from(t).select('*').range(from,from+999);if(error)throw error;out=out.concat(data);if(data.length<1000)break;from+=1000}return out}
+async function fetchAll(t){let out=[],from=0;for(;;){const{data,error}=await sb.from(t).select(COLS[t]||'*').range(from,from+999);if(error)throw error;out=out.concat(data);if(data.length<1000)break;from+=1000}return out}
 const DEC={
   profiles:async r=>({id:r.id,username:r.username,role:r.role,active:r.active,createdAt:Date.parse(r.created_at),name:(await decJ(r.name_enc)).name}),
   tasks:async r=>({...await decJ(r.enc),id:r.id,owner:r.owner,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
   meetings:async r=>({...await decJ(r.enc),id:r.id,author:r.author,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
   comments:async r=>({...await decJ(r.enc),id:r.id,type:r.task_id?'task':'meeting',target:r.task_id||r.meeting_id,author:r.author,createdAt:Date.parse(r.created_at)}),
+  reports:async r=>({...await decJ(r.enc),id:r.id,createdBy:r.created_by,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
+  report_revisions:r=>({id:r.id,reportId:r.report_id,editor:r.editor,action:r.action,createdAt:Date.parse(r.created_at)}),
 };
-const MAPKEY={profiles:'accounts',tasks:'tasks',meetings:'meetings',comments:'comments'};
+const MAPKEY={profiles:'accounts',tasks:'tasks',meetings:'meetings',comments:'comments',reports:'reports',report_revisions:'revisions'};
+const COLS={report_revisions:'id,report_id,editor,action,created_at'};  // 이력 스냅샷(enc)은 열람할 때만 불러옴
 
 /* ============ 상태 ============ */
 const S={dek:null,dekRaw:null,me:null,chan:null,lastSync:0,
-  accounts:new Map(),tasks:new Map(),meetings:new Map(),comments:new Map(),
+  accounts:new Map(),tasks:new Map(),meetings:new Map(),comments:new Map(),reports:new Map(),revisions:new Map(),rSel:null,rEdit:null,rEditBase:null,rPrev:false,aiEnabled:false,
   view:'sched',month:new Date(new Date().getFullYear(),new Date().getMonth(),1),sel:todayStr(),scope:'mine',
   rep:{mode:'week',anchor:new Date(),member:'all'},open:new Set(),drafts:{},meetSel:null,meetQ:'',admQ:'',loaded:false};
 const isAdmin=()=>S.me?.role==='admin';
@@ -77,7 +80,7 @@ function gate(kind,e){
   if(kind==='error') return $('#app').innerHTML=shell(`<div class="gb"><p style="margin:0">서버에 연결하지 못했습니다.</p><p class="muted" style="margin:0">config.js의 URL·키와 스키마(schema.sql) 적용 여부를 확인해 주세요.</p><p class="muted mono" style="margin:0;font-size:12px">${esc(e?.message||'')}</p></div>`);
   if(kind==='setup'){
     $('#app').innerHTML=shell(`<form id="fSetup" autocomplete="off">
-      <div><b>최초 관리자 계정 만들기</b><p class="muted" style="margin:4px 0 0;font-size:13px">설치 때 Supabase Secret으로 정한 설정 토큰이 필요합니다. 이 계정으로 팀원 계정을 추가합니다.</p></div>
+      <div><b>최초 관리자 계정 만들기</b><p class="muted" style="margin:4px 0 0;font-size:13px">GitHub Secrets에 등록한 SETUP_TOKEN 값을 입력하세요. 이 계정으로 팀원 계정을 추가합니다.</p></div>
       <div class="field"><label for="su_tok">설정 토큰</label><input class="input" id="su_tok" required type="password" autocomplete="off"></div>
       <div class="field"><label for="su_id">관리자 아이디</label><input class="input" id="su_id" required minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]+" title="영문, 숫자, . _ - 만 사용"></div>
       <div class="field"><label for="su_name">이름</label><input class="input" id="su_name" required maxlength="20"></div>
@@ -131,7 +134,7 @@ async function login(u,pw){
 async function logout(){
   if(S.chan){sb.removeChannel(S.chan);S.chan=null}
   try{await sb.auth.signOut()}catch{}
-  S.dek=null;S.dekRaw=null;S.me=null;['accounts','tasks','meetings','comments'].forEach(k=>S[k].clear());S.loaded=false;closeModal();gate('login');
+  S.dek=null;S.dekRaw=null;S.me=null;['accounts','tasks','meetings','comments','reports','revisions'].forEach(k=>S[k].clear());S.rEdit=null;S.loaded=false;closeModal();gate('login');
 }
 
 /* ============ 데이터 로드 + 실시간 ============ */
@@ -149,7 +152,8 @@ function onChange(t,p){
   chain=chain.then(async()=>{
     const m=S[MAPKEY[t]];
     if(p.eventType==='DELETE'){const id=p.old?.id;if(id)m.delete(id);
-      if(t==='tasks'||t==='meetings')for(const[c,v]of S.comments)if(v.target===id)S.comments.delete(c);}
+      if(t==='tasks'||t==='meetings')for(const[c,v]of S.comments)if(v.target===id)S.comments.delete(c);
+      if(t==='reports')for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);}
     else{try{m.set(p.new.id,await DEC[t](p.new))}catch{}}
     if(t==='profiles'&&S.me){const me=S.accounts.get(S.me.id);if(!me||!me.active){toast('계정이 삭제되었거나 비활성화되었습니다.');return logout()}S.me=me}
     render();
@@ -161,8 +165,9 @@ async function startApp(){
   if(!S.me)return;
   S.loaded=true;renderShell();
   S.chan=sb.channel('tf-'+rnd(6));
-  ['profiles','tasks','meetings','comments'].forEach(t=>S.chan.on('postgres_changes',{event:'*',schema:'public',table:t},p=>onChange(t,p)));
+  ['profiles','tasks','meetings','comments','reports','report_revisions'].forEach(t=>S.chan.on('postgres_changes',{event:'*',schema:'public',table:t},p=>onChange(t,p)));
   S.chan.subscribe();
+  aiStatus().then(()=>{if(S.view==='reports')render()});
 }
 // 탭으로 돌아올 때 1분 이상 지났으면 전체 동기화(실시간 연결이 끊겼을 경우 대비)
 document.addEventListener('visibilitychange',async()=>{
@@ -176,7 +181,7 @@ const upsertLocal=async(t,row)=>{S[MAPKEY[t]].set(row.id,await DEC[t](row));rend
 
 /* ============ 공통 렌더 ============ */
 function renderShell(){
-  const tabs=[['sched','잡스케줄러'],['report','업무 Report'],['meet','회의록 로그']];if(isAdmin())tabs.push(['admin','관리자']);
+  const tabs=[['sched','잡스케줄러'],['report','업무 Report'],['meet','회의록 로그'],['reports','보고서']];if(isAdmin())tabs.push(['admin','관리자']);
   if(S.view==='admin'&&!isAdmin())S.view='sched';
   $('#app').innerHTML=`<header class="top"><div class="wrap">
     <div class="brand"><b>닥터빌 TF 워크로그</b><span>ENCRYPTED · SUPABASE</span></div>
@@ -194,7 +199,7 @@ function render(){
   if(lastRole!==null&&lastRole!==S.me.role){lastRole=S.me.role;return renderShell()}lastRole=S.me.role;
   if(!S.loaded){v.innerHTML=`<div class="empty">데이터를 불러와 복호화하는 중…</div>`;return}
   const ae=document.activeElement,aid=ae&&v.contains(ae)?ae.id:null,ss=ae?.selectionStart,se=ae?.selectionEnd,sy=window.scrollY;
-  v.innerHTML=({sched:vSched,report:vReport,meet:vMeet,admin:vAdmin}[S.view]||vSched)();
+  v.innerHTML=({sched:vSched,report:vReport,meet:vMeet,reports:vReports,admin:vAdmin}[S.view]||vSched)();
   bind[S.view]?.();
   if(aid){const el=document.getElementById(aid);if(el){el.focus();try{if(ss!=null)el.setSelectionRange(ss,se)}catch{}}}
   window.scrollTo(0,sy);
@@ -348,6 +353,7 @@ bind.meet=()=>{
 async function delRow(t,id,msg){
   await safe(()=>sb.from(t).delete().eq('id',id),msg);
   S[MAPKEY[t]].delete(id);for(const[c,v]of S.comments)if(v.target===id)S.comments.delete(c);
+  if(t==='reports'){for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);S.rSel=null}
   if(t==='meetings')S.meetSel=null;render();
 }
 
@@ -405,6 +411,269 @@ bind.admin=()=>{
     confirmBox('회의록을 삭제할까요?',`‘${m.title}’과 달린 코멘트 ${cCount('meeting',m.id)}개가 함께 삭제됩니다.`,()=>delRow('meetings',m.id,'회의록을 삭제했습니다'))});
   bindTaskRows();
 };
+
+
+/* ============ 보고서 ============ */
+const CIRC='①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+const circ=i=>i<20?CIRC[i]:'-';
+const md=s=>{const d=pYmd(s);return `${d.getMonth()+1}.${d.getDate()}`};
+const ymdDot=s=>s.replace(/-/g,'.');
+const korDate=d=>`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+const clip=(s,n)=>{s=String(s||'').replace(/\s+/g,' ').trim();return s.length>n?s.slice(0,n-1)+'…':s};
+const firstLines=(s,n)=>String(s||'').split('\n').map(x=>x.replace(/^[\s\-•·*\d.)①-⑳]+/,'').trim()).filter(Boolean).slice(0,n);
+const newRptId=()=>{const d=new Date();return 'RPT-'+ymd(d).replace(/-/g,'')+'-'+rnd(4)};
+
+// 기간 내 업무·회의록·코멘트를 모아 요약 재료(facts)로 만듦
+function collectFacts(s,e,member){
+  const inP=t=>t.date>=s&&t.date<=e&&(member==='all'||t.owner===member);
+  const tasks=[...S.tasks.values()].filter(inP).sort((a,b)=>a.date.localeCompare(b.date));
+  const days=Math.round((pYmd(e)-pYmd(s))/864e5)+1;
+  const ne=ymd(addDays(pYmd(e),days));
+  const next=[...S.tasks.values()].filter(t=>t.status==='todo'&&t.date>e&&t.date<=ne&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
+  const late=[...S.tasks.values()].filter(t=>t.status==='todo'&&t.date<=e&&t.date<todayStr()&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
+  const meetings=[...S.meetings.values()].filter(m=>m.date>=s&&m.date<=e).sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
+  const cm=id=>cList('task',id).map(c=>({by:c.authorName||nameOf(c.author),at:fmtDT(c.createdAt),text:c.text}));
+  const mcm=id=>cList('meeting',id).map(c=>({by:c.authorName||nameOf(c.author),at:fmtDT(c.createdAt),text:c.text}));
+  return {period:{start:s,end:e,days},nextEnd:ne,members:[...new Set(tasks.map(t=>t.owner))].length,
+    tasks:tasks.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),status:t.status==='done'?'한 일':'할 일',title:t.title,detail:t.detail||'',overdue:isLate(t),comments:cm(t.id)})),
+    overdue:late.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title})),
+    nextPlans:next.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title})),
+    meetings:meetings.map(m=>({id:m.id,date:m.date,time:m.time||'',title:m.title,place:m.place||'',attendees:m.attendees||'',agenda:m.agenda||'',content:m.content||'',decisions:m.decisions||'',actions:m.actions||'',comments:mcm(m.id)}))};
+}
+
+// 규칙 기반 초안 (AI 미사용 시)
+function draftReport(title,s,e,member){
+  const F=collectFacts(s,e,member);
+  const done=F.tasks.filter(t=>t.status==='한 일'),todo=F.tasks.filter(t=>t.status==='할 일');
+  const cmCount=F.tasks.reduce((n,t)=>n+t.comments.length,0);
+  const pLabel=`${ymdDot(s)} ~ ${ymdDot(e)}`;
+  const byOwner=list=>{const g={};list.forEach(t=>(g[t.owner]??=[]).push(t));return Object.entries(g).sort((a,b)=>a[0].localeCompare(b[0],'ko'))};
+  const summary=[];
+  summary.push(F.tasks.length?`보고 기간(${pLabel}) TF 업무는 총 ${F.tasks.length}건으로 완료 ${done.length}건, 진행 ${todo.length}건이며 기한이 지난 할 일은 ${F.overdue.length}건임`:`보고 기간(${pLabel})에 등록된 TF 업무는 없음`);
+  if(F.meetings.length){const dec=F.meetings.flatMap(m=>firstLines(m.decisions,2)).slice(0,2);
+    summary.push(`회의 ${F.meetings.length}회 진행(${F.meetings.slice(0,3).map(m=>m.title).join(', ')}${F.meetings.length>3?' 등':''})${dec.length?'. 주요 결정은 '+dec.join(', ')+'임':'함'}`);}
+  else summary.push('보고 기간에 기록된 회의는 없음');
+  if(F.nextPlans.length) summary.push(`차기 주요 계획은 ${F.nextPlans.slice(0,3).map(t=>t.title).join(', ')}${F.nextPlans.length>3?` 외 ${F.nextPlans.length-3}건`:''}이며 ${ymdDot(F.nextEnd)}까지 진행 예정임`);
+  if(F.overdue.length) summary.push(`기한 경과 업무 ${F.overdue.length}건(${F.overdue.slice(0,2).map(t=>t.title).join(', ')}${F.overdue.length>2?' 등':''})은 일정 재조정이 필요함`);
+  if(cmCount) summary.push(`업무 코멘트 ${cmCount}건이 기록되었으며 주요 이슈는 3장에 정리함`);
+
+  const sec=[];
+  sec.push({title:'1. 보고 개요',body:[`① 보고 기간 : ${pLabel} (${F.period.days}일)`,`② 대상 : ${member==='all'?'TF 전원':nameOf(member)} (업무 등록 인원 ${F.members}명)`,`③ 집계 기준 : 잡스케줄러 업무 일자, 회의록 회의 일자 기준`].join('\n')});
+  {const L=[];byOwner(done).forEach(([o,ts],i)=>{L.push(`${i+1}) ${o} (${ts.length}건)`);ts.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (${md(t.date)})${t.detail?' : '+clip(firstLines(t.detail,1)[0]||'',80):''}`))});
+    sec.push({title:'2. 주요 성과',body:L.length?L.join('\n'):'보고 기간에 완료된 업무 없음'});}
+  {const L=[];let k=1;
+    if(todo.length){L.push(`${k++}) 진행 중 업무 (${todo.length}건)`);todo.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, ${md(t.date)}${t.overdue?' (기한 경과)':''}`))}
+    const lateOut=F.overdue.filter(t=>t.date<s);
+    if(lateOut.length){L.push(`${k++}) 이전 기간 미완료 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, 기한 ${md(t.date)}`))}
+    const withC=F.tasks.filter(t=>t.comments.length);
+    if(withC.length){L.push(`${k++}) 코멘트 이슈`);withC.slice(0,10).forEach((t,j)=>{const c=t.comments[t.comments.length-1];L.push(`${circ(j)} ${t.title} : ${clip(c.text,90)} (${c.by})`)})}
+    sec.push({title:'3. 진행 현황 및 이슈',body:L.length?L.join('\n'):'특이 이슈 없음'});}
+  {const L=[];F.meetings.forEach((m,i)=>{L.push(`${i+1}) ${m.title} (${md(m.date)}${m.attendees?', 참석 : '+clip(m.attendees,40):''})`);
+      const d=firstLines(m.decisions,8),a=firstLines(m.actions,8);
+      if(!d.length&&!a.length)firstLines(m.content,3).forEach((x,j)=>L.push(`${circ(j)} ${clip(x,100)}`));
+      d.forEach((x,j)=>L.push(`${circ(j)} ${clip(x,120)}`));a.forEach(x=>L.push(`- 후속 조치 : ${clip(x,120)}`));});
+    sec.push({title:'4. 회의 주요 결정사항',body:L.length?L.join('\n'):'보고 기간에 기록된 회의 없음'});}
+  {const L=[];byOwner(F.nextPlans).forEach(([o,ts],i)=>{L.push(`${i+1}) ${o}`);ts.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (${md(t.date)})`))});
+    sec.push({title:'5. 향후 계획',body:L.length?L.join('\n'):`${ymdDot(F.nextEnd)}까지 등록된 차기 계획 없음`});}
+
+  const appendix=[];
+  if(F.tasks.length)appendix.push({title:'업무 목록',head:['업무ID','일자','담당','업무명','구분'],rows:F.tasks.map(t=>[t.id,ymdDot(t.date),t.owner,t.title,t.status+(t.overdue?'(경과)':'')])});
+  if(F.meetings.length)appendix.push({title:'회의 목록',head:['일자','회의명','참석자','결정사항'],rows:F.meetings.map(m=>[ymdDot(m.date),m.title,clip(m.attendees,40),clip(firstLines(m.decisions,3).join(' / '),120)])});
+  return {v:1,title,period:{s,e},member,dateLine:`보고일 : ${korDate(new Date())}`,metaLine:`보고기간 : ${pLabel} · 대상 : ${member==='all'?'TF 전원':nameOf(member)}`,summary,sections:sec,appendix};
+}
+
+// 본문 표기 → HTML
+function bodyHtml(text){
+  return String(text||'').split('\n').map(l=>{const t=l.trim();if(!t)return '<div class="rb-gap"></div>';
+    if(/^\d+\)\s*/.test(t))return `<p class="rb-sub">${esc(t)}</p>`;
+    if(/^[①-⑳]/.test(t))return `<p class="rb-num">${esc(t)}</p>`;
+    if(/^[-•]\s*/.test(t))return `<p class="rb-bul">${esc(t.replace(/^[-•]\s*/,''))}</p>`;
+    if(/^※/.test(t))return `<p class="rb-note">${esc(t)}</p>`;
+    return `<p class="rb-p">${esc(t)}</p>`}).join('');
+}
+function docHtml(r){
+  return `<article class="rdoc">
+    <h2 class="rd-title">${esc(r.title)}</h2>
+    <p class="rd-meta">${esc(r.dateLine||'')}</p><p class="rd-meta">${esc(r.metaLine||'')}</p>
+    ${(r.summary||[]).filter(x=>String(x).trim()).length?`<div class="rd-box"><p class="rd-boxh">■ 보고요약</p>${r.summary.filter(x=>String(x).trim()).map((x,i)=>`<p class="rd-sum">${i+1}. ${esc(x)}</p>`).join('')}</div>`:''}
+    ${(r.sections||[]).map(s=>`<h3 class="rd-h">${esc(s.title)}</h3>${bodyHtml(s.body)}`).join('')}
+    ${(r.appendix||[]).length?`<h3 class="rd-h">■ 참고자료</h3>${r.appendix.map((t,i)=>`<p class="rd-th">${i+1}. ${esc(t.title)}</p><div class="tblwrap"><table class="rd-tbl"><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(row=>`<tr>${row.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`).join('')}`:''}
+  </article>`;
+}
+
+// 편집 화면
+function editHtml(d){
+  const ta=(id,val,rows,ph)=>`<textarea class="input re-ta" id="${id}" rows="${rows}" placeholder="${ph||''}">${esc(val)}</textarea>`;
+  return `<div class="rdoc redit">
+    <div class="field"><label for="re_title">제목</label><input class="input re-title" id="re_title" value="${esc(d.title)}"></div>
+    <div class="g2"><div class="field"><label for="re_date">보고일 줄</label><input class="input" id="re_date" value="${esc(d.dateLine||'')}"></div>
+      <div class="field"><label for="re_meta">기간·대상 줄</label><input class="input" id="re_meta" value="${esc(d.metaLine||'')}"></div></div>
+    <div class="field"><label for="re_sum">■ 보고요약 (한 줄에 한 항목, 번호는 자동)</label>${ta('re_sum',(d.summary||[]).join('\n'),6)}</div>
+    <p class="re-hint">본문 표기 : <b>1) 소제목</b> · <b>① 번호 항목</b> · <b>- 하위 항목</b> · <b>※ 주석</b> · 그 외는 일반 문단</p>
+    ${(d.sections||[]).map((s,i)=>`<section class="re-sec"><div class="re-sech"><input class="input re-st" id="re_st_${i}" data-sec="${i}" value="${esc(s.title)}" aria-label="섹션 제목">
+      <button class="iconbtn" data-secup="${i}" aria-label="위로" ${i===0?'disabled':''}>↑</button><button class="iconbtn" data-secdn="${i}" aria-label="아래로" ${i===d.sections.length-1?'disabled':''}>↓</button><button class="btn sm danger" data-secdel="${i}">섹션 삭제</button></div>
+      ${ta('re_sb_'+i,s.body,Math.min(18,Math.max(4,String(s.body).split('\n').length+1)))}</section>`).join('')}
+    <button class="btn sm" id="re_addsec">+ 섹션 추가</button>
+    <h3 class="rd-h">■ 참고자료</h3>
+    ${(d.appendix||[]).map((t,ti)=>`<section class="re-sec"><div class="re-sech"><input class="input re-st" id="re_tt_${ti}" value="${esc(t.title)}" aria-label="표 제목"><button class="btn sm danger" data-tbldel="${ti}">표 삭제</button></div>
+      <div class="tblwrap"><table class="rd-tbl re-tbl"><thead><tr>${t.head.map((h,ci)=>`<th><input class="re-cell" id="re_h_${ti}_${ci}" value="${esc(h)}"></th>`).join('')}<th></th></tr></thead>
+      <tbody>${t.rows.map((row,ri)=>`<tr>${row.map((c,ci)=>`<td><input class="re-cell" id="re_c_${ti}_${ri}_${ci}" value="${esc(c)}"></td>`).join('')}<td><button class="x-row" data-rowdel="${ti}:${ri}" aria-label="행 삭제">×</button></td></tr>`).join('')}</tbody></table></div>
+      <button class="btn sm" data-rowadd="${ti}">+ 행 추가</button></section>`).join('')}
+    <button class="btn sm" id="re_addtbl">+ 표 추가</button>
+  </div>`;
+}
+// 편집 입력값 → S.rEdit 반영
+function syncEdit(){
+  const d=S.rEdit;if(!d||!$('#re_title'))return;
+  d.title=$('#re_title').value;d.dateLine=$('#re_date').value;d.metaLine=$('#re_meta').value;
+  d.summary=$('#re_sum').value.split('\n').map(x=>x.replace(/^\s*\d+\.\s*/,'').trim()).filter(Boolean);
+  d.sections.forEach((s,i)=>{s.title=$('#re_st_'+i).value;s.body=$('#re_sb_'+i).value});
+  d.appendix.forEach((t,ti)=>{t.title=$('#re_tt_'+ti).value;t.head=t.head.map((h,ci)=>$(`#re_h_${ti}_${ci}`).value);t.rows=t.rows.map((row,ri)=>row.map((c,ci)=>$(`#re_c_${ti}_${ri}_${ci}`).value))});
+}
+
+function vReports(){
+  const list=[...S.reports.values()].sort((a,b)=>b.updatedAt-a.updatedAt);
+  if(S.rEdit) return vReportEdit();
+  if(!S.rSel||!S.reports.has(S.rSel))S.rSel=list[0]?.id||null;
+  const r=S.rSel?S.reports.get(S.rSel):null;
+  const revs=r?revList(r.id):[];
+  return `<div class="vhead"><h1>보고서</h1><span class="sp"></span>${isAdmin()?'<button class="btn primary" id="rNew">+ 보고서 생성</button>':''}</div>
+  <div class="meet"><div class="panel" style="overflow:hidden"><div class="mlist">${list.length?list.map(x=>`<button class="mitem" data-rsel="${esc(x.id)}" aria-current="${x.id===S.rSel}"><div class="meta" style="margin:0 0 2px"><span class="mono">${ymdDot(x.period?.s||'')} ~ ${ymdDot(x.period?.e||'')}</span></div><div class="t">${esc(x.title)}</div><div class="meta">최종 저장 <span class="mono">${fmtDT(x.updatedAt)}</span></div></button>`).join(''):`<div class="empty">${isAdmin()?'아직 보고서가 없습니다.<br>‘보고서 생성’으로 기간을 고르면 업무 Report와 회의록을 모아 초안을 만듭니다.':'아직 생성된 보고서가 없습니다.<br>관리자가 보고서를 만들면 여기에서 열람·수정할 수 있습니다.'}</div>`}</div></div>
+    <div>${r?`<div class="rtool"><span class="jid">${esc(r.id)}</span><span class="sp" style="flex:1"></span>
+      <button class="btn sm" id="rEdit">수정</button><button class="btn sm" id="rDocx">Word 다운로드</button><button class="btn sm" id="rHist">수정 이력 ${revs.length}</button>${isAdmin()?'<button class="btn sm danger" id="rDel">삭제</button>':''}</div>
+      <div class="rpaper">${docHtml(r)}</div>`:`<div class="panel"><div class="empty" style="padding:60px 20px">왼쪽 목록에서 보고서를 선택하세요.</div></div>`}</div></div>`;
+}
+function vReportEdit(){
+  const d=S.rEdit,isNew=!S.reports.has(d.id);
+  const ai=isAdmin()?`<button class="btn sm" id="reAI" ${S.aiEnabled?'':'disabled'} title="${S.aiEnabled?'업무·회의록을 Claude AI로 요약해 보고요약과 본문을 다시 작성합니다':'Anthropic API 키를 등록하면 사용할 수 있습니다'}">Claude AI 요약${S.aiEnabled?'':' (준비 중)'}</button>`:'';
+  return `<div class="vhead"><h1>${isNew?'보고서 초안':'보고서 수정'}</h1><span class="jid">${esc(d.id)}</span><span class="sp"></span>
+    ${ai}<button class="btn sm" id="rePrev">${S.rPrev?'편집으로':'미리보기'}</button><button class="btn" id="reCancel">취소</button><button class="btn primary" id="reSave">${isNew?'보고서 저장':'저장'}</button></div>
+    ${!S.aiEnabled&&isAdmin()?'<div class="banner">Claude AI 요약은 Anthropic API 키 등록 후 켜집니다. 지금은 업무·회의록을 규칙에 따라 정리한 초안입니다.</div>':''}
+    <div class="rpaper">${S.rPrev?docHtml(d):editHtml(d)}</div>`;
+}
+const revList=id=>[...S.revisions.values()].filter(v=>v.reportId===id).sort((a,b)=>b.createdAt-a.createdAt);
+bind.reports=()=>{
+  document.querySelectorAll('[data-rsel]').forEach(b=>b.onclick=()=>{S.rSel=b.dataset.rsel;render()});
+  if($('#rNew'))$('#rNew').onclick=modalNewReport;
+  const r=S.reports.get(S.rSel);
+  if($('#rEdit'))$('#rEdit').onclick=()=>{S.rEdit=JSON.parse(JSON.stringify(stripMeta(r)));S.rEditBase=r.updatedAt;S.rPrev=false;render()};
+  if($('#rDocx'))$('#rDocx').onclick=()=>exportDocx(r);
+  if($('#rHist'))$('#rHist').onclick=()=>modalHistory(r);
+  if($('#rDel'))$('#rDel').onclick=()=>confirmBox('보고서를 삭제할까요?',`‘${r.title}’과 수정 이력이 모두 삭제됩니다.`,()=>delRow('reports',r.id,'보고서를 삭제했습니다'));
+  if(!S.rEdit)return;
+  const d=S.rEdit;
+  document.querySelectorAll('.redit input, .redit textarea').forEach(el=>el.oninput=()=>syncEdit());
+  const re=fn=>()=>{syncEdit();fn();render()};
+  if($('#re_addsec'))$('#re_addsec').onclick=re(()=>d.sections.push({title:`${d.sections.length+1}. 새 섹션`,body:''}));
+  if($('#re_addtbl'))$('#re_addtbl').onclick=re(()=>d.appendix.push({title:'새 표',head:['항목','내용'],rows:[['','']]}));
+  document.querySelectorAll('[data-secdel]').forEach(b=>b.onclick=re(()=>d.sections.splice(+b.dataset.secdel,1)));
+  document.querySelectorAll('[data-secup]').forEach(b=>b.onclick=re(()=>{const i=+b.dataset.secup;[d.sections[i-1],d.sections[i]]=[d.sections[i],d.sections[i-1]]}));
+  document.querySelectorAll('[data-secdn]').forEach(b=>b.onclick=re(()=>{const i=+b.dataset.secdn;[d.sections[i+1],d.sections[i]]=[d.sections[i],d.sections[i+1]]}));
+  document.querySelectorAll('[data-tbldel]').forEach(b=>b.onclick=re(()=>d.appendix.splice(+b.dataset.tbldel,1)));
+  document.querySelectorAll('[data-rowadd]').forEach(b=>b.onclick=re(()=>{const t=d.appendix[+b.dataset.rowadd];t.rows.push(t.head.map(()=>''))}));
+  document.querySelectorAll('[data-rowdel]').forEach(b=>b.onclick=re(()=>{const[ti,ri]=b.dataset.rowdel.split(':').map(Number);d.appendix[ti].rows.splice(ri,1)}));
+  $('#rePrev').onclick=()=>{syncEdit();S.rPrev=!S.rPrev;render()};
+  $('#reCancel').onclick=()=>{S.rEdit=null;S.rPrev=false;render()};
+  $('#reSave').onclick=()=>{syncEdit();saveReport()};
+  if($('#reAI'))$('#reAI').onclick=()=>{syncEdit();aiSummarize()};
+};
+const stripMeta=r=>{const{id,createdBy,createdAt,updatedAt,...c}=r;return{...c,id}};
+async function saveReport(force){
+  const d=S.rEdit;if(!d.title.trim())return toast('제목을 입력하세요.');
+  const exists=S.reports.has(d.id);
+  if(exists&&!force){const cur=S.reports.get(d.id);if(cur.updatedAt!==S.rEditBase){
+    openModal(`<div class="mh"><h2>다른 사용자가 먼저 저장했습니다</h2></div><div class="mb"><p style="margin:0">편집을 시작한 뒤 <b>${fmtDT(cur.updatedAt)}</b>에 다른 저장이 있었습니다. 지금 내용으로 저장하면 그 수정 내용을 덮어씁니다. 이전 내용은 수정 이력에 남아 있습니다.</p></div>
+      <div class="mf"><button class="btn" data-close>취소</button><button class="btn primary" id="ovw">덮어쓰고 저장</button></div>`);
+    $('#ovw').onclick=()=>{closeModal();saveReport(true)};return;}}
+  const {id,...content}=d;
+  try{
+    const enc=await encJ(content);
+    const r=exists?await safe(()=>sb.from('reports').update({enc}).eq('id',id).select().single(),'저장했습니다. 수정 이력에 기록되었습니다.')
+                  :await safe(()=>sb.from('reports').insert({id,created_by:S.me.id,enc}).select().single(),'보고서를 저장했습니다.');
+    S.rEdit=null;S.rPrev=false;S.rSel=id;await upsertLocal('reports',r.data);loadRevisions(id);
+  }catch{}
+}
+async function loadRevisions(id){try{const{data}=await sb.from('report_revisions').select('id,report_id,editor,action,created_at').eq('report_id',id);(data||[]).forEach(v=>S.revisions.set(v.id,DEC.report_revisions(v)));render()}catch{}}
+function modalNewReport(){
+  const t=new Date(),ws=weekStart(t);
+  openModal(`<form id="fNR"><div class="mh"><h2>보고서 생성</h2></div><div class="mb">
+    <p class="muted" style="margin:0;font-size:13px">선택한 기간의 업무 Report(한 일·할 일·코멘트)와 회의록을 모아 보고서 초안을 만듭니다. 초안은 화면에서 수정한 뒤 저장합니다.</p>
+    <div class="field"><label for="nr_title">보고서 제목</label><input class="input" id="nr_title" value="닥터빌 TF 업무 보고의 건" required maxlength="120"></div>
+    <div class="field"><label>기간</label><div class="seg" role="group">${[['tw','이번 주'],['lw','지난 주'],['tm','이번 달'],['lm','지난 달']].map(([k,l])=>`<button type="button" data-pq="${k}">${l}</button>`).join('')}</div></div>
+    <div class="g2"><div class="field"><label for="nr_s">시작일</label><input class="input" id="nr_s" type="date" value="${ymd(ws)}" required></div>
+      <div class="field"><label for="nr_e">종료일</label><input class="input" id="nr_e" type="date" value="${ymd(addDays(ws,6))}" required></div></div>
+    <div class="field"><label for="nr_m">대상</label><select class="input" id="nr_m"><option value="all">TF 전원</option>${[...S.accounts.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko')).map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div>
+    <div class="err" id="nr_err"></div></div>
+    <div class="mf"><span class="sp"></span><button type="button" class="btn" data-close>취소</button><button type="submit" class="btn primary">초안 만들기</button></div></form>`);
+  document.querySelectorAll('[data-pq]').forEach(b=>b.onclick=()=>{const k=b.dataset.pq,n=new Date();let s,e;
+    if(k==='tw'){s=weekStart(n);e=addDays(s,6)}else if(k==='lw'){s=addDays(weekStart(n),-7);e=addDays(s,6)}
+    else if(k==='tm'){s=new Date(n.getFullYear(),n.getMonth(),1);e=new Date(n.getFullYear(),n.getMonth()+1,0)}else{s=new Date(n.getFullYear(),n.getMonth()-1,1);e=new Date(n.getFullYear(),n.getMonth(),0)}
+    $('#nr_s').value=ymd(s);$('#nr_e').value=ymd(e)});
+  $('#fNR').onsubmit=ev=>{ev.preventDefault();const s=$('#nr_s').value,e=$('#nr_e').value;if(s>e){$('#nr_err').textContent='시작일이 종료일보다 늦습니다.';return}
+    S.rEdit={id:newRptId(),...draftReport($('#nr_title').value.trim(),s,e,$('#nr_m').value)};S.rPrev=true;S.rEditBase=null;closeModal();render();
+    toast('초안을 만들었습니다. 내용을 확인·수정한 뒤 저장하세요.')};
+}
+async function aiSummarize(){
+  const d=S.rEdit,F=collectFacts(d.period.s,d.period.e,d.member||'all');
+  const btn=$('#reAI');btn.disabled=true;btn.textContent='Claude AI 요약 중…';
+  try{
+    const {data,error}=await sb.functions.invoke('ai-report',{body:{action:'summarize',facts:F}});
+    if(error){let code='';try{code=(await error.context.json()).error}catch{}throw new Error({ai_not_configured:'API 키가 등록되지 않았습니다.',too_large:'자료가 너무 많습니다. 기간을 줄여 주세요.',admin_only:'관리자만 사용할 수 있습니다.'}[code]||'AI 요약에 실패했습니다'+(code?` (${code})`:''))}
+    d.summary=data.result.summary.map(String);d.sections=data.result.sections.map(s=>({title:String(s.title||''),body:String(s.body||'')}));
+    S.rPrev=true;render();toast('Claude AI 요약을 반영했습니다. 내용을 확인한 뒤 저장하세요.');
+  }catch(e){toast(e.message);render()}
+}
+async function aiStatus(){try{const{data}=await sb.functions.invoke('ai-report',{body:{action:'status'}});S.aiEnabled=!!data?.enabled}catch{S.aiEnabled=false}}
+async function modalHistory(r){
+  await loadRevisions(r.id);const revs=revList(r.id);
+  openModal(`<div class="mh"><h2>수정 이력</h2><span class="muted" style="font-size:12.5px">${esc(r.title)}</span></div><div class="mb" style="max-height:60vh;overflow:auto">
+    <p class="muted" style="margin:0;font-size:12.5px">저장할 때마다 서버가 자동으로 기록합니다. 이력은 보고서 본문과 Word 파일에는 들어가지 않습니다.</p>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>저장 일시</th><th>저장자</th><th>구분</th><th></th></tr></thead><tbody>
+    ${revs.map((v,i)=>`<tr><td class="mono">${fmtDT(v.createdAt)}</td><td>${esc(nameOf(v.editor))}</td><td>${v.action==='create'?'최초 생성':'수정'}${i===0?' <span class="st done">현재</span>':''}</td>
+      <td><div class="acts"><button class="btn sm" data-rv="${v.id}">보기</button>${isAdmin()&&i>0?`<button class="btn sm" data-rr="${v.id}">이 버전으로 복원</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="4"><div class="empty">이력이 없습니다.</div></td></tr>'}
+    </tbody></table></div><div id="rvView"></div></div>
+    <div class="mf"><span class="sp"></span><button class="btn" data-close>닫기</button></div>`,true);
+  const snap=async id=>{const{data,error}=await sb.from('report_revisions').select('enc').eq('id',id).single();if(error)throw error;return decJ(data.enc)};
+  document.querySelectorAll('[data-rv]').forEach(b=>b.onclick=async()=>{try{const c=await snap(+b.dataset.rv);$('#rvView').innerHTML=`<div class="rpaper" style="margin-top:12px">${docHtml(c)}</div>`}catch{toast('이력을 불러오지 못했습니다.')}});
+  document.querySelectorAll('[data-rr]').forEach(b=>b.onclick=async()=>{try{const c=await snap(+b.dataset.rr);closeModal();S.rEdit={...c,id:r.id};S.rEditBase=r.updatedAt;S.rPrev=true;render();toast('선택한 버전을 불러왔습니다. 저장하면 복원됩니다.')}catch{toast('이력을 불러오지 못했습니다.')}});
+}
+
+/* ---------- Word(.docx) 출력: 업로드 양식 기준 (A4, 보고요약 회색 박스, 회색 머리글 표) ---------- */
+const DOCX_SRC='https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.iife.js';
+const DOCX_SRI='sha384-v5JwXHXYQQRi5zRcJWDssEQsr2vhTpf4uXXDq+4OV6/mtd8zOakGLqBxLpmumXKr';
+function loadDocx(){if(window.docx)return Promise.resolve(window.docx);return new Promise((ok,ng)=>{const s=document.createElement('script');s.src=DOCX_SRC;s.integrity=DOCX_SRI;s.crossOrigin='anonymous';s.onload=()=>ok(window.docx);s.onerror=()=>ng(new Error('Word 변환 모듈을 불러오지 못했습니다.'));document.head.appendChild(s)})}
+async function exportDocx(r){
+  let D;try{toast('Word 파일을 만드는 중…');D=await loadDocx()}catch(e){return toast(e.message)}
+  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,ShadingType,BorderStyle}=D;
+  const F='맑은 고딕',G='EDEDED';
+  const run=(t,o={})=>new TextRun({text:t,font:F,size:o.size||22,bold:!!o.bold,color:o.color});
+  const para=(t,o={})=>new Paragraph({children:[run(t,o)],alignment:o.align,spacing:{after:o.after??80,before:o.before??0,line:300},indent:o.indent});
+  const border={style:BorderStyle.SINGLE,size:4,color:'808080'};const borders={top:border,bottom:border,left:border,right:border};
+  const kids=[];
+  kids.push(para(r.title,{size:28,bold:true,align:AlignmentType.CENTER,after:200}));
+  if(r.dateLine)kids.push(para(r.dateLine,{bold:true,align:AlignmentType.RIGHT,after:40}));
+  if(r.metaLine)kids.push(para(r.metaLine,{bold:true,align:AlignmentType.RIGHT,after:200}));
+  const sums=(r.summary||[]).filter(x=>String(x).trim());
+  if(sums.length)kids.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[new TableCell({borders,shading:{type:ShadingType.CLEAR,color:'auto',fill:G},margins:{top:120,bottom:120,left:160,right:160},
+    children:[para('■ 보고요약',{bold:true,after:100}),...sums.map((x,i)=>para(`${i+1}. ${x}`,{after:80,indent:{left:300,hanging:300}}))]})]})]}));
+  const bodyParas=text=>String(text||'').split('\n').map(l=>{const t=l.trim();if(!t)return para('',{after:40});
+    if(/^\d+\)\s*/.test(t))return para(t,{bold:true,before:120,after:60});
+    if(/^[①-⑳]/.test(t))return para(t,{indent:{left:400,hanging:280}});
+    if(/^[-•]\s*/.test(t))return para('· '+t.replace(/^[-•]\s*/,''),{indent:{left:700,hanging:200}});
+    if(/^※/.test(t))return para(t,{size:17,color:'555555',indent:{left:400}});
+    return para(t,{indent:{left:200}})});
+  (r.sections||[]).forEach(s=>{kids.push(para(s.title,{bold:true,before:280,after:100}));kids.push(...bodyParas(s.body))});
+  if((r.appendix||[]).length){kids.push(para('■ 참고자료',{bold:true,before:320,after:120}));
+    r.appendix.forEach((t,i)=>{kids.push(para(`${i+1}. ${t.title}`,{bold:true,before:160,after:80}));
+      const cell=(txt,head)=>new TableCell({borders,shading:head?{type:ShadingType.CLEAR,color:'auto',fill:G}:undefined,margins:{top:40,bottom:40,left:80,right:80},
+        children:[new Paragraph({alignment:head?AlignmentType.CENTER:undefined,children:[run(String(txt??''),{size:18,bold:head})]})]});
+      kids.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({tableHeader:true,children:t.head.map(h=>cell(h,true))}),...t.rows.map(row=>new TableRow({children:row.map(c=>cell(c,false))}))]}));});}
+  const doc=new Document({styles:{default:{document:{run:{font:F,size:22}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1701,bottom:1701,left:1440,right:1440}}},children:kids}]});
+  const blob=await Packer.toBlob(doc);
+  const name=`${ymd(new Date()).slice(2).replace(/-/g,'')}_${r.title.replace(/[\\/:*?"<>|]/g,'').trim()||'보고서'}.docx`;
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
+  toast('Word 파일을 내려받았습니다.');
+}
 
 /* ============ 모달 ============ */
 function openModal(html,wide){$('#modal').innerHTML=`<div class="scrim" id="scrim"><div class="modal ${wide?'wide':''}" role="dialog" aria-modal="true">${html}</div></div>`;
