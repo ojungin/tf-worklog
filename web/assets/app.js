@@ -619,15 +619,19 @@ function buildMetrics(M,e){
     const ytdC=agg(cur.map((v,i)=>both[i]?v:null),how),ytdP=agg(prev.map((v,i)=>both[i]?v:null),how);
     return {label,div,dec,how,cur,prev,all:agg(cur,how),ytdC:n?ytdC:agg(cur,how),ytdP:n?ytdP:null,n,lastBoth:both.lastIndexOf(true)+1}});
   const cell=(v,r)=>v==null?'-':nf(v/r.div,r.dec);
-  const t1={title:`월별 실적 (${Y}년 1~${Mo}월, 전년 동월 비교)`,head:['구분','연도',...months.map(m=>m+'월'),'누계'],rows:[]};
-  R.forEach(r=>{const tot=(arr)=>cell(agg(arr,r.how),r);
-    t1.rows.push([r.label,String(Y),...r.cur.map(v=>cell(v,r)),tot(r.cur)]);
-    t1.rows.push(['',String(LY),...r.prev.map(v=>cell(v,r)),tot(r.prev)]);
-    t1.rows.push(['','증감률',...months.map((m,i)=>pctTxt(pct(r.cur[i],r.prev[i]))),pctTxt(r.ytdP==null?null:pct(r.ytdC,r.ytdP))])});
+  const by=l=>R.find(r=>r.label.startsWith(l));
+  // 지표 세트: 선형 그래프(표 값으로 그림) + 월별 표
+  const rowsOf=r=>{const tot=arr=>cell(agg(arr,r.how),r);return [
+    [r.label,String(Y),...r.cur.map(v=>cell(v,r)),tot(r.cur)],
+    ['',String(LY),...r.prev.map(v=>cell(v,r)),tot(r.prev)],
+    ['','증감률',...months.map((m,i)=>pctTxt(pct(r.cur[i],r.prev[i]))),pctTxt(r.ytdP==null?null:pct(r.ytdC,r.ytdP))]]};
+  const SETS=[['① 매출',['매출']],['② 회원수',['신규','누적']],['③ 활동성 지표',['MAU','조회수']],['④ 포인트 적립·사용',['포인트 적립','포인트 사용']]];
+  const sets=SETS.map(([title,keys])=>{const rs=keys.map(by);
+    return {title:`${title} (${Y}년 1~${Mo}월, 전년 동월 비교)`,head:['구분','연도',...months.map(m=>m+'월'),'누계'],rows:rs.flatMap(rowsOf),
+      charts:rs.map((r,i)=>({title:r.label,rows:[i*3,i*3+1]}))}});
   const t2={title:'전년 동기 대비 (양년 모두 집계된 달 기준 누계)',head:['구분','기준',String(LY),String(Y),'증감','증감률'],rows:R.map(r=>{
     const basis=r.n?`1~${r.lastBoth}월 ${r.how==='sum'?'합계':r.how==='avg'?'월평균':'말'}`:'전년 자료 없음';
     return [r.label,basis,r.ytdP==null?'-':cell(r.ytdP,r),cell(r.ytdC,r),r.ytdP==null||r.ytdC==null?'-':((r.ytdC-r.ytdP>=0?'+':'')+nf((r.ytdC-r.ytdP)/r.div,r.dec)),pctTxt(r.ytdP==null?null:pct(r.ytdC,r.ytdP))]})};
-  const by=l=>R.find(r=>r.label.startsWith(l));
   const cmp=(r,fmt)=>r.ytdP==null?'':` (1~${r.lastBoth}월 기준 전년 동기 ${fmt(r.ytdP)} → ${fmt(r.ytdC)}, ${pctTxt(pct(r.ytdC,r.ytdP))})`;
   const nm=v=>nf(v)+'명';
   const sa=by('매출'),nw=by('신규'),cm=by('누적'),ma=by('MAU'),vw=by('조회수'),pu=by('포인트 사용'),pe=by('포인트 적립');
@@ -636,13 +640,13 @@ function buildMetrics(M,e){
     `② 회원 : 신규 가입 ${nm(nw.all)}${cmp(nw,nm)}, 누적 ${nm(cm.all)}${cm.ytdP!=null?` (전년 동월 대비 ${pctTxt(pct(cm.ytdC,cm.ytdP))})`:''}`,
     `③ 활동 : 월평균 MAU ${nm(ma.all)}, 조회수 ${nf((vw.all||0)/1e4)}만회${ma.ytdP==null?' (활동 지표는 2026년부터 집계되어 전년 비교 없음)':cmp(ma,nm)}`,
     `④ 포인트 : 사용 ${eok(pu.all)}${cmp(pu,eok)}, 적립 ${eok(pe.all)}${cmp(pe,eok)}`,
-    `2) 월별 실적 및 전년 동기 비교 : 아래 표 참조`,
+    `2) 지표별 월별 추이 : 아래 그래프·표 참조 (실선 ${Y}년, 점선 ${LY}년)`,
     `※ 출처 : Dashboard_DV (매출 ${M.meta?.salesBasis||''}${M.meta?.salesNote?', '+M.meta.salesNote:''}) · 동기화 ${M.syncedAt?fmtDT(M.syncedAt):'-'}`,
     `※ 표의 누계 : 매출·신규 회원·조회수·포인트는 합계, MAU는 월평균, 누적 회원은 최종월 값`,
     `※ 미집계 달은 ‘-’${partial?`, ${Mo}월은 집계 중인 부분 수치`:''}이며, 전년 동기 비교는 양년 모두 마감된 달만 합산함`];
   const yo=r=>r.ytdP!=null?`(전년 동기 대비 ${pctTxt(pct(r.ytdC,r.ytdP))})`:'';
   const sum=`${Y}년 1~${Mo}월 누계 매출 ${eok(sa.all)}${yo(sa)}, 신규 회원 ${nm(nw.all)}${yo(nw)}, 포인트 사용 ${eok(pu.all)}${yo(pu)}이며, 전년 비교는 양년 모두 마감된 1~${sa.lastBoth}월 기준임`;
-  return {body:L.join('\n'),tables:[t1,t2],sum,raw:R.map(r=>({label:r.label,months,cur:r.cur,prev:r.prev,ytdCur:r.ytdC,ytdPrev:r.ytdP,comparableMonths:r.n}))};
+  return {body:L.join('\n'),tables:[...sets,t2],sum,raw:R.map(r=>({label:r.label,months,cur:r.cur,prev:r.prev,ytdCur:r.ytdC,ytdPrev:r.ytdP,comparableMonths:r.n}))};
 }
 
 // 규칙 기반 초안 (AI 미사용 시)
@@ -714,7 +718,30 @@ function bodyHtml(text){
     if(/^※/.test(t))return `<p class="rb-note">${esc(t)}</p>`;
     return `<p class="rb-p">${esc(t)}</p>`}).join('');
 }
-const tblHtml=t=>`<p class="rd-th">${esc(t.title)}</p><div class="tblwrap"><table class="rd-tbl ${t.head.length>8?'wide':''}"><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(row=>`<tr>${row.map((c,ci)=>`<td class="${ci>1&&t.head.length>4?'num':''}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+// 표 값 → 선형 그래프 (점·값 표시). 표를 고치면 그래프도 따라 바뀜
+const cNum=c=>{const v=String(c??'').replace(/[,\s]/g,'');return v===''||v==='-'||!isFinite(+v)?null:+v};
+function chartSvg(t,c,W=640,H=230){
+  const n=t.head.length-3;if(n<1)return '';const labels=t.head.slice(2,2+n);
+  const ser=c.rows.map((ri,k)=>({name:(t.rows[ri]||[])[1]||'',vals:((t.rows[ri]||[]).slice(2,2+n)).map(cNum),txt:((t.rows[ri]||[]).slice(2,2+n)).map(x=>String(x??'')),k})).filter(x=>x.vals.some(v=>v!=null));
+  if(!ser.length)return '';
+  const all=ser.flatMap(x=>x.vals).filter(v=>v!=null);let lo=Math.min(...all),hi=Math.max(...all);if(lo===hi){lo-=Math.abs(lo)*.1||1;hi+=Math.abs(hi)*.1||1}
+  const pad=(hi-lo)*.18;lo-=pad;hi+=pad;
+  const L=16,R=16,T=34,B=28,pw=W-L-R,ph=H-T-B,x=i=>L+(n===1?pw/2:pw*(i+.5)/n),y=v=>T+ph*(1-(v-lo)/(hi-lo));
+  const COL=['#1F4E8C','#9AA5B4'],fs=n>10?9.5:10.5;
+  let g=`<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/><text x="${L}" y="18" font-size="12.5" font-weight="700" fill="#13213b">${esc(c.title)}</text>`;
+  ser.forEach((s_,k)=>{const lx=W-R-(ser.length-k)*78;g+=`<line x1="${lx}" y1="14" x2="${lx+18}" y2="14" stroke="${COL[k]||'#666'}" stroke-width="2" ${k?'stroke-dasharray="4 3"':''}/><circle cx="${lx+9}" cy="14" r="3" fill="${k?'#fff':COL[0]}" stroke="${COL[k]||'#666'}" stroke-width="1.6"/><text x="${lx+23}" y="18" font-size="11" fill="#333">${esc(s_.name)}</text>`});
+  g+=`<line x1="${L}" y1="${T+ph}" x2="${W-R}" y2="${T+ph}" stroke="#c9d1de"/>`;
+  labels.forEach((m,i)=>{g+=`<text x="${x(i)}" y="${H-9}" font-size="11" fill="#555" text-anchor="middle">${esc(m)}</text>`});
+  ser.forEach(s_=>{const col=COL[s_.k]||'#666';let d='';s_.vals.forEach((v,i)=>{if(v==null)return;d+=(d&&s_.vals[i-1]!=null?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)});
+    g+=`<path d="${d}" fill="none" stroke="${col}" stroke-width="${s_.k?1.6:2.2}" ${s_.k?'stroke-dasharray="5 3"':''}/>`});
+  ser.forEach(s_=>{const col=COL[s_.k]||'#666';s_.vals.forEach((v,i)=>{if(v==null)return;
+    const other=ser.find(o=>o!==s_)?.vals[i],above=other==null||v>=other;
+    g+=`<circle cx="${x(i)}" cy="${y(v)}" r="3.2" fill="${s_.k?'#fff':col}" stroke="${col}" stroke-width="1.6"/>`;
+    g+=`<text x="${x(i)}" y="${above?y(v)-7:y(v)+14}" font-size="${fs}" fill="${s_.k?'#6b7686':'#13213b'}" font-weight="${s_.k?400:700}" text-anchor="middle">${esc(s_.txt[i])}</text>`})});
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif" role="img" aria-label="${esc(c.title)} 월별 추이">${g}</svg>`;
+}
+const chartsHtml=t=>(t.charts||[]).length?`<div class="rd-charts">${t.charts.map(c=>`<div class="rd-chart">${chartSvg(t,c)}</div>`).join('')}</div>`:'';
+const tblHtml=t=>`<p class="rd-th">${esc(t.title)}</p>${chartsHtml(t)}<div class="tblwrap"><table class="rd-tbl ${t.head.length>8?'wide':''}"><thead><tr>${t.head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(row=>`<tr>${row.map((c,ci)=>`<td class="${ci>1&&t.head.length>4?'num':''}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 function docHtml(r){
   return `<article class="rdoc">
     <h2 class="rd-title">${esc(r.title)}</h2>
@@ -737,7 +764,7 @@ function editHtml(d){
     ${(d.sections||[]).map((s,i)=>`<section class="re-sec"><div class="re-sech"><input class="input re-st" id="re_st_${i}" data-sec="${i}" value="${esc(s.title)}" aria-label="섹션 제목">
       <button class="iconbtn" data-secup="${i}" aria-label="위로" ${i===0?'disabled':''}>↑</button><button class="iconbtn" data-secdn="${i}" aria-label="아래로" ${i===d.sections.length-1?'disabled':''}>↓</button><button class="btn sm danger" data-secdel="${i}">섹션 삭제</button></div>
       ${ta('re_sb_'+i,s.body,Math.min(18,Math.max(4,String(s.body).split('\n').length+1)))}
-      ${(s.tables||[]).map((t,ti)=>`<div class="re-stbl"><div class="re-sech"><input class="input re-st" id="re_s${i}_tt_${ti}" value="${esc(t.title)}" aria-label="표 제목"><button class="btn sm danger" data-stdel="${i}:${ti}">표 삭제</button></div>
+      ${(s.tables||[]).map((t,ti)=>`<div class="re-stbl"><div class="re-sech"><input class="input re-st" id="re_s${i}_tt_${ti}" value="${esc(t.title)}" aria-label="표 제목"><button class="btn sm danger" data-stdel="${i}:${ti}">표 삭제</button></div>${(t.charts||[]).length?`<p class="re-hint">그래프 ${t.charts.length}개는 이 표의 값으로 자동으로 그려집니다 (미리보기·Word에 반영).</p>`:''}
         <div class="tblwrap"><table class="rd-tbl re-tbl"><thead><tr>${t.head.map((h,ci)=>`<th><input class="re-cell" id="re_s${i}_h_${ti}_${ci}" value="${esc(h)}"></th>`).join('')}</tr></thead>
         <tbody>${t.rows.map((row,ri)=>`<tr>${row.map((c,ci)=>`<td><input class="re-cell" id="re_s${i}_c_${ti}_${ri}_${ci}" value="${esc(c)}"></td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`).join('')}</section>`).join('')}
     <button class="btn sm" id="re_addsec">+ 섹션 추가</button>
@@ -873,9 +900,14 @@ async function modalHistory(r){
 const DOCX_SRC='https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.iife.js';
 const DOCX_SRI='sha384-v5JwXHXYQQRi5zRcJWDssEQsr2vhTpf4uXXDq+4OV6/mtd8zOakGLqBxLpmumXKr';
 function loadDocx(){if(window.docx)return Promise.resolve(window.docx);return new Promise((ok,ng)=>{const s=document.createElement('script');s.src=DOCX_SRC;s.integrity=DOCX_SRI;s.crossOrigin='anonymous';s.onload=()=>ok(window.docx);s.onerror=()=>ng(new Error('Word 변환 모듈을 불러오지 못했습니다.'));document.head.appendChild(s)})}
+// SVG 문자열 → PNG(ArrayBuffer), Word 삽입용 (2배 해상도)
+function svgPng(svg,w,h){return new Promise(ok=>{if(!svg)return ok(null);const img=new Image();
+  img.onload=()=>{const c=document.createElement('canvas');c.width=w*2;c.height=h*2;const x=c.getContext('2d');x.scale(2,2);x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);
+    c.toBlob(b=>b?b.arrayBuffer().then(ok):ok(null),'image/png')};img.onerror=()=>ok(null);
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)})}
 async function exportDocx(r){
   let D;try{toast('Word 파일을 만드는 중…');D=await loadDocx()}catch(e){return toast(e.message)}
-  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,ShadingType,BorderStyle}=D;
+  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,ShadingType,BorderStyle,ImageRun}=D;
   const F='맑은 고딕',G='EDEDED';
   const run=(t,o={})=>new TextRun({text:t,font:F,size:o.size||22,bold:!!o.bold,color:o.color});
   const para=(t,o={})=>new Paragraph({children:[run(t,o)],alignment:o.align,spacing:{after:o.after??80,before:o.before??0,line:300},indent:o.indent});
@@ -897,8 +929,12 @@ async function exportDocx(r){
     const cell=(txt,head,ci)=>new TableCell({borders,shading:head?{type:ShadingType.CLEAR,color:'auto',fill:G}:undefined,margins:{top:30,bottom:30,left:50,right:50},
       children:[new Paragraph({alignment:head?AlignmentType.CENTER:(numc&&ci>1?AlignmentType.RIGHT:undefined),children:[run(String(txt??''),{size:sz,bold:head})]})]});
     return new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({tableHeader:true,children:t.head.map((h,ci)=>cell(h,true,ci))}),...t.rows.map(row=>new TableRow({children:row.map((c,ci)=>cell(c,false,ci))}))]})};
+  const imgs=new Map();
+  for(const s of r.sections||[])for(const t of s.tables||[])for(const c of t.charts||[]){try{const b=await svgPng(chartSvg(t,c,640,230),640,230);if(b)imgs.set(c,b)}catch{}}
   (r.sections||[]).forEach(s=>{kids.push(para(s.title,{bold:true,before:280,after:100}));kids.push(...bodyParas(s.body));
-    (s.tables||[]).forEach(t=>{kids.push(para(t.title,{bold:true,before:160,after:80,size:20}));kids.push(tbl(t))})});
+    (s.tables||[]).forEach(t=>{kids.push(para(t.title,{bold:true,before:160,after:80,size:20}));
+      (t.charts||[]).forEach(c=>{const b=imgs.get(c);if(b)kids.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:60},children:[new ImageRun({data:b,transformation:{width:600,height:216}})]}))});
+      kids.push(tbl(t))})});
   if((r.appendix||[]).length){kids.push(para('■ 참고자료',{bold:true,before:320,after:120}));
     r.appendix.forEach((t,i)=>{kids.push(para(`${i+1}. ${t.title}`,{bold:true,before:160,after:80}));kids.push(tbl(t))});}
   const doc=new Document({styles:{default:{document:{run:{font:F,size:22}}}},sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1701,bottom:1701,left:1440,right:1440}}},children:kids}]});
