@@ -89,6 +89,9 @@ textarea.input{resize:vertical;min-height:70px;line-height:1.5}
 .st.done{background:var(--done-soft);color:var(--done)}
 .st.todo{background:var(--todo-soft);color:var(--todo)}
 .st.late{background:var(--warn-soft);color:var(--warn)}
+.st.progress{background:var(--todo-soft);color:var(--todo)}
+.st.hold{background:var(--sunken);color:var(--muted)}
+.st.fail{background:var(--danger-soft);color:var(--danger)}
 .jid{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);letter-spacing:-.01em}
 
 /* scheduler */
@@ -107,6 +110,11 @@ textarea.input{resize:vertical;min-height:70px;line-height:1.5}
 .chip{font-size:11.5px;padding:1px 6px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid}
 .chip.todo{background:var(--todo-soft);border-color:var(--todo)}
 .chip.done{background:var(--done-soft);border-color:var(--done);color:var(--muted);text-decoration:line-through;text-decoration-color:var(--muted)}
+.chip.progress{background:var(--todo-soft);border-color:var(--todo)}
+.chip.hold{background:var(--sunken);border-color:var(--muted);color:var(--muted)}
+.chip.fail{background:var(--danger-soft);border-color:var(--danger)}
+.legend i.lg-progress{background:var(--todo)} .legend i.lg-done{background:var(--done)} .legend i.lg-hold{background:var(--muted)} .legend i.lg-fail{background:var(--danger)}
+.goal{font-size:12.5px;color:var(--muted);margin-top:2px;word-break:break-word;white-space:pre-wrap}
 .more{font-size:11px;color:var(--muted);padding-left:4px}
 .legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 0 0;font-size:12.5px;color:var(--muted)}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
@@ -136,6 +144,8 @@ textarea.input{resize:vertical;min-height:70px;line-height:1.5}
 .rcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .rcol{padding:4px 16px 12px;min-width:0}
 .rcol+.rcol{border-left:1px solid var(--line)}
+.rcols.q4 .rcol:nth-child(odd){border-left:0}
+.rcols.q4 .rcol:nth-child(n+3){border-top:1px solid var(--line)}
 .rcol h3{font-size:12px;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px;font-weight:600}
 .ritem{padding:12px 0;border-bottom:1px dashed var(--line)}
 .ritem:last-child{border-bottom:0}
@@ -204,7 +214,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
   .g2{grid-template-columns:minmax(0,1fr)}
   .cell{min-height:64px;padding:4px}
   .chip{font-size:0;padding:0;height:5px;border-left-width:0}
-  .chip.todo{background:var(--todo)} .chip.done{background:var(--done)}
+  .chip.todo,.chip.progress{background:var(--todo)} .chip.done{background:var(--done)} .chip.hold{background:var(--muted)} .chip.fail{background:var(--danger)}
   .more{font-size:10px;padding:0}
   .who{margin-left:0;width:100%}
   .mgrid{grid-template-columns:minmax(0,1fr)}
