@@ -66,13 +66,13 @@ create table if not exists public.comments (
 create index if not exists comments_task_idx    on public.comments(task_id);
 create index if not exists comments_meeting_idx on public.comments(meeting_id);
 
--- ---------- 권한 헬퍼 ----------
-create or replace function public.is_active_member()
+-- ---------- 권한 헬퍼 (같은 Supabase 프로젝트의 다른 서비스와 겹치지 않도록 tf_ 접두어) ----------
+create or replace function public.tf_is_active_member()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.profiles where id = auth.uid() and active);
 $$;
 
-create or replace function public.is_admin()
+create or replace function public.tf_is_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.profiles where id = auth.uid() and active and role = 'admin');
 $$;
@@ -83,11 +83,11 @@ returns boolean language sql stable security definer set search_path = public as
   select exists (select 1 from public.workspace);
 $$;
 
-revoke all on function public.is_active_member()      from public;
-revoke all on function public.is_admin()              from public;
+revoke all on function public.tf_is_active_member()      from public;
+revoke all on function public.tf_is_admin()              from public;
 revoke all on function public.workspace_initialized() from public;
-grant execute on function public.is_active_member()      to authenticated;
-grant execute on function public.is_admin()              to authenticated;
+grant execute on function public.tf_is_active_member()      to authenticated;
+grant execute on function public.tf_is_admin()              to authenticated;
 grant execute on function public.workspace_initialized() to anon, authenticated;
 
 -- ---------- 작성자·생성시각 변경 방지 트리거 ----------
@@ -124,47 +124,47 @@ grant select, insert, delete on public.comments to authenticated;
 
 -- profiles: 활성 사용자는 조회만. 쓰기는 Edge Function(service role) 전용
 drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles for select to authenticated using (public.is_active_member());
+create policy profiles_select on public.profiles for select to authenticated using (public.tf_is_active_member());
 
 -- key_wraps: 본인 것만 조회. 쓰기는 Edge Function 전용
 drop policy if exists key_wraps_select on public.key_wraps;
 create policy key_wraps_select on public.key_wraps for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists workspace_select on public.workspace;
-create policy workspace_select on public.workspace for select to authenticated using (public.is_active_member());
+create policy workspace_select on public.workspace for select to authenticated using (public.tf_is_active_member());
 
 -- tasks: 전원 조회 / 본인 명의로 등록 / 수정·삭제는 본인 또는 관리자
 drop policy if exists tasks_select on public.tasks;
 drop policy if exists tasks_insert on public.tasks;
 drop policy if exists tasks_update on public.tasks;
 drop policy if exists tasks_delete on public.tasks;
-create policy tasks_select on public.tasks for select to authenticated using (public.is_active_member());
-create policy tasks_insert on public.tasks for insert to authenticated with check (public.is_active_member() and owner = auth.uid());
+create policy tasks_select on public.tasks for select to authenticated using (public.tf_is_active_member());
+create policy tasks_insert on public.tasks for insert to authenticated with check (public.tf_is_active_member() and owner = auth.uid());
 create policy tasks_update on public.tasks for update to authenticated
-  using (public.is_active_member() and (owner = auth.uid() or public.is_admin()));
+  using (public.tf_is_active_member() and (owner = auth.uid() or public.tf_is_admin()));
 create policy tasks_delete on public.tasks for delete to authenticated
-  using (public.is_active_member() and (owner = auth.uid() or public.is_admin()));
+  using (public.tf_is_active_member() and (owner = auth.uid() or public.tf_is_admin()));
 
 -- meetings: 전원 조회 / 본인 명의로 작성 / 수정은 작성자·관리자 / 삭제는 관리자
 drop policy if exists meetings_select on public.meetings;
 drop policy if exists meetings_insert on public.meetings;
 drop policy if exists meetings_update on public.meetings;
 drop policy if exists meetings_delete on public.meetings;
-create policy meetings_select on public.meetings for select to authenticated using (public.is_active_member());
-create policy meetings_insert on public.meetings for insert to authenticated with check (public.is_active_member() and author = auth.uid());
+create policy meetings_select on public.meetings for select to authenticated using (public.tf_is_active_member());
+create policy meetings_insert on public.meetings for insert to authenticated with check (public.tf_is_active_member() and author = auth.uid());
 create policy meetings_update on public.meetings for update to authenticated
-  using (public.is_active_member() and (author = auth.uid() or public.is_admin()));
-create policy meetings_delete on public.meetings for delete to authenticated using (public.is_admin());
+  using (public.tf_is_active_member() and (author = auth.uid() or public.tf_is_admin()));
+create policy meetings_delete on public.meetings for delete to authenticated using (public.tf_is_admin());
 
 -- comments: 전원 조회 / 본인 명의로 작성 / 삭제는 작성자·관리자 (수정 없음)
 drop policy if exists comments_select on public.comments;
 drop policy if exists comments_insert on public.comments;
 drop policy if exists comments_delete on public.comments;
-create policy comments_select on public.comments for select to authenticated using (public.is_active_member());
+create policy comments_select on public.comments for select to authenticated using (public.tf_is_active_member());
 create policy comments_insert on public.comments for insert to authenticated
-  with check (public.is_active_member() and author = auth.uid() and created_at > now() - interval '1 minute');
+  with check (public.tf_is_active_member() and author = auth.uid() and created_at > now() - interval '1 minute');
 create policy comments_delete on public.comments for delete to authenticated
-  using (public.is_active_member() and (author = auth.uid() or public.is_admin()));
+  using (public.tf_is_active_member() and (author = auth.uid() or public.tf_is_admin()));
 
 -- ---------- 실시간 반영 ----------
 do $$
