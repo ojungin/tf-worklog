@@ -213,3 +213,42 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
   .navg .lbl{min-width:120px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- 보고서 (업로드 양식 기준: A4 보고의 건) ---------- */
+.rtool{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.rpaper{background:var(--sunken);border-radius:10px;padding:clamp(10px,3vw,28px);overflow-x:auto}
+.rdoc{background:#fff;color:#111;max-width:794px;margin:0 auto;padding:clamp(20px,6vw,72px) clamp(18px,6vw,72px);box-shadow:var(--shadow);font-size:14.5px;line-height:1.7;font-family:"Malgun Gothic","맑은 고딕","IBM Plex Sans KR",sans-serif;min-width:0}
+.rdoc .rd-title{text-align:center;font-size:19px;font-weight:700;margin:0 0 18px;letter-spacing:-.01em;word-break:keep-all}
+.rdoc .rd-meta{text-align:right;font-weight:700;margin:0;font-size:14px}
+.rdoc .rd-box{background:#EDEDED;border:1px solid #9a9a9a;padding:12px 16px;margin:18px 0 8px}
+.rdoc .rd-boxh{font-weight:700;margin:0 0 6px}
+.rdoc .rd-sum{margin:0 0 6px;padding-left:1.4em;text-indent:-1.4em;word-break:break-word}
+.rdoc .rd-h{font-size:14.5px;font-weight:700;margin:22px 0 8px}
+.rdoc .rb-sub{font-weight:700;margin:10px 0 4px}
+.rdoc .rb-num{margin:0 0 4px;padding-left:2.2em;text-indent:-1.2em;word-break:break-word}
+.rdoc .rb-bul{margin:0 0 3px;padding-left:3.4em;text-indent:-.8em;word-break:break-word}
+.rdoc .rb-bul::before{content:"· "}
+.rdoc .rb-note{margin:0 0 4px;padding-left:2.2em;font-size:11.5px;color:#555}
+.rdoc .rb-p{margin:0 0 4px;padding-left:1em;word-break:break-word}
+.rdoc .rb-gap{height:6px}
+.rdoc .rd-th{font-weight:700;margin:14px 0 6px}
+.rdoc .rd-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px}
+.rdoc .rd-tbl th,.rdoc .rd-tbl td{border:1px solid #808080;padding:5px 7px;vertical-align:top;color:#111}
+.rdoc .rd-tbl th{background:#EDEDED;font-weight:700;text-align:center;white-space:nowrap}
+.redit{display:flex;flex-direction:column;gap:14px}
+.redit .input{background:#fff;color:#111;border-color:#c9ced8}
+.redit .field label{color:#4a5468}
+.re-title{font-size:17px;font-weight:700;text-align:center}
+.re-ta{font-family:inherit;font-size:14px;line-height:1.65}
+.re-hint{margin:0;font-size:12.5px;color:#4a5468;background:#f3f5f9;border-radius:6px;padding:8px 10px}
+.re-sec{display:flex;flex-direction:column;gap:6px;border-top:1px dashed #c9ced8;padding-top:12px}
+.re-sech{display:flex;gap:6px;align-items:center}
+.re-sech .re-st{font-weight:700;flex:1;min-width:0}
+.redit .iconbtn{background:#fff;color:#111;border-color:#c9ced8}
+.redit .iconbtn:disabled{opacity:.35}
+.re-tbl .re-cell{width:100%;min-width:70px;border:0;background:transparent;font:inherit;color:#111;padding:2px}
+.re-tbl th .re-cell{font-weight:700;text-align:center}
+.re-tbl .re-cell:focus{outline:2px solid #2a62c9;background:#fff}
+.x-row{border:0;background:none;color:#b4291f;cursor:pointer;font-size:16px}
+.rdoc .btn{background:#fff;color:#111;border-color:#c9ced8}
+.rdoc .btn.danger{color:#b4291f;border-color:#f0c9c5}
