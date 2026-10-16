@@ -4,7 +4,8 @@ name: Deploy (Supabase + GitHub Pages)
 #   Variables : SUPABASE_PROJECT_REF   (Supabase 프로젝트 REF, 공개 값)
 #   Secrets   : SUPABASE_ACCESS_TOKEN  (supabase.com → Account → Access Tokens)
 #               SETUP_TOKEN            (최초 관리자 생성용 암호문구, 관리자 생성 후 삭제)
-#   선택 Variables : TF_EMAIL_DOMAIN, ALLOWED_ORIGIN(커스텀 도메인 사용 시),
+#   선택 Secret  : ANTHROPIC_API_KEY      (보고서 Claude AI 요약 사용 시. 없으면 요약 버튼 비활성)
+#   선택 Variables : TF_CLAUDE_MODEL(기본 claude-sonnet-4-5), TF_EMAIL_DOMAIN, ALLOWED_ORIGIN(커스텀 도메인 사용 시),
 #                    DISABLE_SIGNUP=true (Supabase 프로젝트를 TF 전용으로 쓸 때만)
 
 on:
@@ -65,6 +66,8 @@ jobs:
       - name: Set function secrets
         env:
           SETUP_TOKEN: ${{ secrets.SETUP_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.TF_CLAUDE_MODEL }}
           TF_EMAIL_DOMAIN: ${{ vars.TF_EMAIL_DOMAIN }}
           ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
           OWNER: ${{ github.repository_owner }}
@@ -76,10 +79,18 @@ jobs:
           else
             supabase secrets unset TF_SETUP_TOKEN --project-ref "$REF" >/dev/null 2>&1 || true
           fi
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            args+=("TF_ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+          else
+            supabase secrets unset TF_ANTHROPIC_API_KEY --project-ref "$REF" >/dev/null 2>&1 || true
+          fi
+          if [ -n "$CLAUDE_MODEL" ]; then args+=("TF_CLAUDE_MODEL=$CLAUDE_MODEL"); fi
           supabase secrets set "${args[@]}" --project-ref "$REF"
 
-      - name: Deploy Edge Function
-        run: supabase functions deploy admin-users --no-verify-jwt --use-api --project-ref "$REF"
+      - name: Deploy Edge Functions
+        run: |
+          supabase functions deploy admin-users --no-verify-jwt --use-api --project-ref "$REF"
+          supabase functions deploy ai-report --no-verify-jwt --use-api --project-ref "$REF"
 
       - name: Read public API key
         id: keys
