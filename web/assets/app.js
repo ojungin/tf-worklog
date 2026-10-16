@@ -50,11 +50,11 @@ const DEC={
   tasks:async r=>({...await decJ(r.enc),id:r.id,owner:r.owner,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
   meetings:async r=>({...await decJ(r.enc),id:r.id,author:r.author,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
   comments:async r=>({...await decJ(r.enc),id:r.id,type:r.task_id?'task':'meeting',target:r.task_id||r.meeting_id,author:r.author,createdAt:Date.parse(r.created_at)}),
-  reports:async r=>({...await decJ(r.enc),id:r.id,createdBy:r.created_by,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
-  report_revisions:r=>({id:r.id,reportId:r.report_id,editor:r.editor,action:r.action,createdAt:Date.parse(r.created_at)}),
+  tf_reports:async r=>({...await decJ(r.enc),id:r.id,createdBy:r.created_by,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
+  tf_report_revisions:r=>({id:r.id,reportId:r.report_id,editor:r.editor,action:r.action,createdAt:Date.parse(r.created_at)}),
 };
-const MAPKEY={profiles:'accounts',tasks:'tasks',meetings:'meetings',comments:'comments',reports:'reports',report_revisions:'revisions'};
-const COLS={report_revisions:'id,report_id,editor,action,created_at'};  // 이력 스냅샷(enc)은 열람할 때만 불러옴
+const MAPKEY={profiles:'accounts',tasks:'tasks',meetings:'meetings',comments:'comments',tf_reports:'reports',tf_report_revisions:'revisions'};
+const COLS={tf_report_revisions:'id,report_id,editor,action,created_at'};  // 이력 스냅샷(enc)은 열람할 때만 불러옴
 
 /* ============ 상태 ============ */
 const S={dek:null,dekRaw:null,me:null,chan:null,lastSync:0,
@@ -153,7 +153,7 @@ function onChange(t,p){
     const m=S[MAPKEY[t]];
     if(p.eventType==='DELETE'){const id=p.old?.id;if(id)m.delete(id);
       if(t==='tasks'||t==='meetings')for(const[c,v]of S.comments)if(v.target===id)S.comments.delete(c);
-      if(t==='reports')for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);}
+      if(t==='tf_reports')for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);}
     else{try{m.set(p.new.id,await DEC[t](p.new))}catch{}}
     if(t==='profiles'&&S.me){const me=S.accounts.get(S.me.id);if(!me||!me.active){toast('계정이 삭제되었거나 비활성화되었습니다.');return logout()}S.me=me}
     render();
@@ -165,7 +165,7 @@ async function startApp(){
   if(!S.me)return;
   S.loaded=true;renderShell();
   S.chan=sb.channel('tf-'+rnd(6));
-  ['profiles','tasks','meetings','comments','reports','report_revisions'].forEach(t=>S.chan.on('postgres_changes',{event:'*',schema:'public',table:t},p=>onChange(t,p)));
+  ['profiles','tasks','meetings','comments','tf_reports','tf_report_revisions'].forEach(t=>S.chan.on('postgres_changes',{event:'*',schema:'public',table:t},p=>onChange(t,p)));
   S.chan.subscribe();
   aiStatus().then(()=>{if(S.view==='reports')render()});
 }
@@ -353,7 +353,7 @@ bind.meet=()=>{
 async function delRow(t,id,msg){
   await safe(()=>sb.from(t).delete().eq('id',id),msg);
   S[MAPKEY[t]].delete(id);for(const[c,v]of S.comments)if(v.target===id)S.comments.delete(c);
-  if(t==='reports'){for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);S.rSel=null}
+  if(t==='tf_reports'){for(const[k,v]of S.revisions)if(v.reportId===id)S.revisions.delete(k);S.rSel=null}
   if(t==='meetings')S.meetSel=null;render();
 }
 
@@ -559,7 +559,7 @@ bind.reports=()=>{
   if($('#rEdit'))$('#rEdit').onclick=()=>{S.rEdit=JSON.parse(JSON.stringify(stripMeta(r)));S.rEditBase=r.updatedAt;S.rPrev=false;render()};
   if($('#rDocx'))$('#rDocx').onclick=()=>exportDocx(r);
   if($('#rHist'))$('#rHist').onclick=()=>modalHistory(r);
-  if($('#rDel'))$('#rDel').onclick=()=>confirmBox('보고서를 삭제할까요?',`‘${r.title}’과 수정 이력이 모두 삭제됩니다.`,()=>delRow('reports',r.id,'보고서를 삭제했습니다'));
+  if($('#rDel'))$('#rDel').onclick=()=>confirmBox('보고서를 삭제할까요?',`‘${r.title}’과 수정 이력이 모두 삭제됩니다.`,()=>delRow('tf_reports',r.id,'보고서를 삭제했습니다'));
   if(!S.rEdit)return;
   const d=S.rEdit;
   document.querySelectorAll('.redit input, .redit textarea').forEach(el=>el.oninput=()=>syncEdit());
@@ -588,12 +588,12 @@ async function saveReport(force){
   const {id,...content}=d;
   try{
     const enc=await encJ(content);
-    const r=exists?await safe(()=>sb.from('reports').update({enc}).eq('id',id).select().single(),'저장했습니다. 수정 이력에 기록되었습니다.')
-                  :await safe(()=>sb.from('reports').insert({id,created_by:S.me.id,enc}).select().single(),'보고서를 저장했습니다.');
-    S.rEdit=null;S.rPrev=false;S.rSel=id;await upsertLocal('reports',r.data);loadRevisions(id);
+    const r=exists?await safe(()=>sb.from('tf_reports').update({enc}).eq('id',id).select().single(),'저장했습니다. 수정 이력에 기록되었습니다.')
+                  :await safe(()=>sb.from('tf_reports').insert({id,created_by:S.me.id,enc}).select().single(),'보고서를 저장했습니다.');
+    S.rEdit=null;S.rPrev=false;S.rSel=id;await upsertLocal('tf_reports',r.data);loadRevisions(id);
   }catch{}
 }
-async function loadRevisions(id){try{const{data}=await sb.from('report_revisions').select('id,report_id,editor,action,created_at').eq('report_id',id);(data||[]).forEach(v=>S.revisions.set(v.id,DEC.report_revisions(v)));render()}catch{}}
+async function loadRevisions(id){try{const{data}=await sb.from('tf_report_revisions').select('id,report_id,editor,action,created_at').eq('report_id',id);(data||[]).forEach(v=>S.revisions.set(v.id,DEC.tf_report_revisions(v)));render()}catch{}}
 function modalNewReport(){
   const t=new Date(),ws=weekStart(t);
   openModal(`<form id="fNR"><div class="mh"><h2>보고서 생성</h2></div><div class="mb">
@@ -633,7 +633,7 @@ async function modalHistory(r){
       <td><div class="acts"><button class="btn sm" data-rv="${v.id}">보기</button>${isAdmin()&&i>0?`<button class="btn sm" data-rr="${v.id}">이 버전으로 복원</button>`:''}</div></td></tr>`).join('')||'<tr><td colspan="4"><div class="empty">이력이 없습니다.</div></td></tr>'}
     </tbody></table></div><div id="rvView"></div></div>
     <div class="mf"><span class="sp"></span><button class="btn" data-close>닫기</button></div>`,true);
-  const snap=async id=>{const{data,error}=await sb.from('report_revisions').select('enc').eq('id',id).single();if(error)throw error;return decJ(data.enc)};
+  const snap=async id=>{const{data,error}=await sb.from('tf_report_revisions').select('enc').eq('id',id).single();if(error)throw error;return decJ(data.enc)};
   document.querySelectorAll('[data-rv]').forEach(b=>b.onclick=async()=>{try{const c=await snap(+b.dataset.rv);$('#rvView').innerHTML=`<div class="rpaper" style="margin-top:12px">${docHtml(c)}</div>`}catch{toast('이력을 불러오지 못했습니다.')}});
   document.querySelectorAll('[data-rr]').forEach(b=>b.onclick=async()=>{try{const c=await snap(+b.dataset.rr);closeModal();S.rEdit={...c,id:r.id};S.rEditBase=r.updatedAt;S.rPrev=true;render();toast('선택한 버전을 불러왔습니다. 저장하면 복원됩니다.')}catch{toast('이력을 불러오지 못했습니다.')}});
 }
