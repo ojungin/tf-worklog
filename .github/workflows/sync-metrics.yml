@@ -1,0 +1,50 @@
+name: Sync DV metrics (보고서 실적)
+
+# Dashboard_DV 프로젝트의 datasets에서 월별 실적(매출·회원·활동·포인트) 집계값만 읽어
+# TF 워크로그 DB(public.tf_metrics)에 저장합니다. 추가 Secret 없이 배포용 SUPABASE_ACCESS_TOKEN을 사용합니다.
+#   선택 Variables: DV_PROJECT_REF (기본: Dashboard_DV 프로젝트)
+
+on:
+  schedule:
+    - cron: '17 21 * * *'   # 매일 06:17 KST
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Deploy (Supabase + GitHub Pages)']
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-metrics
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TF_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      DV_REF: ${{ vars.DV_PROJECT_REF || 'isyfjrrzarjouiktueyd' }}
+      API: https://api.supabase.com/v1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Dashboard_DV metrics
+        run: |
+          jq -Rs '{query: .}' scripts/dv_metrics.sql > /tmp/q.json
+          code=$(curl -sS -o /tmp/dv.json -w "%{http_code}" -X POST "$API/projects/$DV_REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" --data @/tmp/q.json)
+          if [ "$code" -ge 300 ]; then echo "::error::Dashboard_DV 조회 실패 (HTTP $code)"; cat /tmp/dv.json; exit 1; fi
+          jq -e '.[0].metrics.sales and .[0].metrics.members' /tmp/dv.json > /dev/null || { echo "::error::실적 데이터 형식이 예상과 다릅니다"; exit 1; }
+          jq -c '.[0].metrics' /tmp/dv.json > /tmp/metrics.json
+          echo "metrics bytes: $(wc -c < /tmp/metrics.json)"
+      - name: Write to TF DB
+        run: |
+          grep -q 'tfm_q' /tmp/metrics.json && { echo "::error::예상치 못한 문자열"; exit 1; } || true
+          { printf "insert into public.tf_metrics(key, data, updated_at) values ('dv', \$tfm_q\$"; cat /tmp/metrics.json; printf "\$tfm_q\$::jsonb, now()) on conflict (key) do update set data = excluded.data, updated_at = now();"; } > /tmp/w.sql
+          jq -Rs '{query: .}' /tmp/w.sql > /tmp/w.json
+          code=$(curl -sS -o /tmp/r.json -w "%{http_code}" -X POST "$API/projects/$TF_REF/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" --data @/tmp/w.json)
+          if [ "$code" -ge 300 ]; then echo "::error::TF DB 저장 실패 (HTTP $code)"; cat /tmp/r.json; exit 1; fi
+          echo "saved"
