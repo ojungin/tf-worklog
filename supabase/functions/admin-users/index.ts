@@ -1,12 +1,13 @@
 // 닥터빌 TF 워크로그 — 계정 관리 Edge Function
 // 배포: supabase functions deploy admin-users --no-verify-jwt
 //  (호출자 인증은 아래 코드에서 직접 검증합니다)
-// 필요한 Secret: SETUP_TOKEN (최초 관리자 생성용 일회성 토큰), TF_EMAIL_DOMAIN(선택, 기본 tf-worklog.local)
+// 필요한 Secret: TF_SETUP_TOKEN (최초 관리자 생성용 일회성 토큰), TF_EMAIL_DOMAIN(선택), TF_ALLOWED_ORIGIN(선택)
+// (다른 서비스와 같은 Supabase 프로젝트를 공유해도 충돌하지 않도록 TF_ 접두어 사용)
 // SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 는 Supabase가 자동 주입합니다.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*"; // 운영 시 페이지 도메인으로 제한 권장
+const ALLOWED_ORIGIN = Deno.env.get("TF_ALLOWED_ORIGIN") ?? "*"; // 운영 시 페이지 도메인으로 제한 권장
 const cors = {
   "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
 
   // ---------- 최초 관리자 생성 ----------
   if (action === "bootstrap") {
-    const token = Deno.env.get("SETUP_TOKEN");
+    const token = Deno.env.get("TF_SETUP_TOKEN");
     if (!token || body.token !== token) return json(403, { error: "invalid_setup_token" });
     const { count } = await sb.from("profiles").select("id", { count: "exact", head: true });
     const { data: ws } = await sb.from("workspace").select("id").maybeSingle();
