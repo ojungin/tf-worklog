@@ -309,3 +309,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl tr.grow td{background:var(--sunken)}
 .secttl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .cmt .x+.x{margin-left:0}
+/* 주요 업무 분류 */
+.cat{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;white-space:nowrap;line-height:1.5}
+.cat.c0{background:#fde8e1;color:#b2421c}
+.cat.c1{background:#e3ecfb;color:#2a62c9}
+.cat.c2{background:#e9e3f8;color:#6a43c4}
+.cat.c3{background:#e1f2ea;color:#1d7a58}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .cat.c0{background:#3d2218;color:#f29a7a}:root:not([data-theme="light"]) .cat.c1{background:#1b2d4f;color:#8fb3f5}:root:not([data-theme="light"]) .cat.c2{background:#2a2145;color:#b9a0f0}:root:not([data-theme="light"]) .cat.c3{background:#143327;color:#6fd3a6}}
+.catbar{display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
+.catbar button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 11px;font-size:12.5px;cursor:pointer;color:var(--muted)}
+.catbar button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] .cat.c0{background:#3d2218;color:#f29a7a}:root[data-theme="dark"] .cat.c1{background:#1b2d4f;color:#8fb3f5}:root[data-theme="dark"] .cat.c2{background:#2a2145;color:#b9a0f0}:root[data-theme="dark"] .cat.c3{background:#143327;color:#6fd3a6}
