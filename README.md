@@ -40,7 +40,7 @@ supabase/
 
 ### 1) Supabase 프로젝트 준비
 1. https://supabase.com 에서 새 프로젝트 생성 (Region: **Northeast Asia (Seoul)** 권장). DB 비밀번호를 보관해 둡니다.
-2. 공개 회원가입 차단은 배포 워크플로가 자동으로 설정합니다.
+2. 프로젝트를 TF 전용으로 쓴다면 Variables에 `DISABLE_SIGNUP=true`를 넣어 공개 회원가입을 막으세요. 다른 서비스와 공유하는 프로젝트라면 넣지 않습니다(회원가입이 열려 있어도 TF 계정이 아니면 RLS로 데이터 접근이 차단됩니다).
 
 ### 2) GitHub 저장소 만들기
 1. 새 저장소 생성(예: `tf-worklog`) 후 이 폴더 내용을 올립니다.
@@ -63,7 +63,7 @@ Supabase URL·공개 키(anon/publishable)는 배포 때 자동으로 읽어 오
 
 ### 4) 배포 실행
 **Actions → Deploy (Supabase + GitHub Pages) → Run workflow**. 한 번에 다음을 수행합니다.
-- DB 테이블·보안정책(RLS) 적용, 공개 회원가입 차단
+- DB 테이블·보안정책(RLS) 적용 (`DISABLE_SIGNUP=true`일 때만 공개 회원가입 차단)
 - 계정관리 Edge Function 배포와 Secret 설정
 - 웹앱을 GitHub Pages에 배포 (완료 화면에 접속 주소 표시)
 
