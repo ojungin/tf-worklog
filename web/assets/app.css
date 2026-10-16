@@ -262,3 +262,50 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .x-row{border:0;background:none;color:#b4291f;cursor:pointer;font-size:16px}
 .rdoc .btn{background:#fff;color:#111;border-color:#c9ced8}
 .rdoc .btn.danger{color:#b4291f;border-color:#f0c9c5}
+
+/* ---- 주요 업무 / 진행 업무 / 업무 기록 ---- */
+.trow.rec{grid-template-columns:minmax(0,1fr)}
+.rhead{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.rpath{display:inline-flex;gap:5px;align-items:baseline;flex-wrap:wrap;min-width:0;font-size:13.5px;word-break:break-word}
+.rpath .gname,.rpath .sep{color:var(--muted)}
+.rline{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;margin-top:5px;font-size:13.5px;white-space:pre-wrap;word-break:break-word;align-items:start}
+.rl{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap;margin-top:1px}
+.rl.done{background:var(--done-soft);color:var(--done)}
+.rl.todo{background:var(--todo-soft);color:var(--todo)}
+.lnk{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-size:12.5px;font-weight:600;text-align:left}
+.lnk:hover{text-decoration:underline}
+.chip.due{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+.legend i.lg-due{background:var(--warn)}
+.duebox{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line);font-size:12.5px}
+.lrow{display:flex;flex-direction:column;gap:1px;padding:6px 0;border-bottom:1px solid var(--line)}
+.lrow:last-child{border-bottom:0}
+.lrow .muted{font-size:12px}
+.gnode{padding:12px 0;border-bottom:1px solid var(--line)}
+.gnode:last-child{border-bottom:0}
+.gtitle{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;background:none;border:0;padding:0;cursor:pointer;text-align:left;font-size:14.5px;color:var(--ink)}
+.gtitle:hover b{color:var(--accent)}
+.wlist{display:flex;flex-direction:column;gap:2px;margin:8px 0 0 10px;border-left:2px solid var(--line);padding-left:10px}
+.wnode{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 0;font-size:12.5px}
+.wbtn{display:inline-flex;gap:8px;align-items:baseline;background:none;border:0;padding:2px 4px;border-radius:6px;cursor:pointer;text-align:left;color:var(--ink)}
+.wbtn:hover{background:var(--sunken)}
+.wbtn .wt{font-weight:600;font-size:13.5px}
+.chkl{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;color:var(--muted);cursor:pointer}
+.gh2{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.gh2 h2 .ttl{font-size:inherit}
+.ritem.wk{padding:14px 0}
+.rrec{padding:6px 0 4px 12px;border-left:2px solid var(--line);margin-top:8px}
+.wrecs{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:0 10px 8px}
+.mcm{margin-top:10px;background:var(--sunken);border-radius:8px;padding:8px 12px;font-size:13px}
+.mcm p{margin:6px 0 0;white-space:pre-wrap;word-break:break-word}
+.mcmh{font-size:11.5px;font-weight:700;color:var(--muted)}
+.hint{font-size:12px;color:var(--muted);min-height:1em}
+.sub{background:var(--sunken);padding:10px;border-radius:8px}
+.cmt .ed{font-size:11.5px;color:var(--muted)}
+.mgoal{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.mgh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.mwork{padding:10px 0;border-bottom:1px dashed var(--line)}
+.mwork:last-child{border-bottom:0}
+.mwork .t{font-weight:600}
+.tbl tr.grow td{background:var(--sunken)}
+.secttl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cmt .x+.x{margin-left:0}
