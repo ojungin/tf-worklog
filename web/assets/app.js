@@ -45,9 +45,12 @@ async function fn(action,payload={}){
   return data;
 }
 async function fetchAll(t){let out=[],from=0;for(;;){const{data,error}=await sb.from(t).select(COLS[t]||'*').range(from,from+999);if(error)throw error;out=out.concat(data);if(data.length<1000)break;from+=1000}return out}
+const ST={progress:'진행중',done:'완료',hold:'보류',fail:'실패'},ST_ORDER=['progress','hold','fail','done'];
+const normSt=v=>v==='done'?'done':v==='hold'?'hold':v==='fail'?'fail':'progress'; // 구버전 'todo' → 진행중
+const stBadge=t=>`<span class="st ${t.status}">${ST[t.status]}</span>`;
 const DEC={
   profiles:async r=>({id:r.id,username:r.username,role:r.role,active:r.active,createdAt:Date.parse(r.created_at),name:(await decJ(r.name_enc)).name}),
-  tasks:async r=>({...await decJ(r.enc),id:r.id,owner:r.owner,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
+  tasks:async r=>{const o=await decJ(r.enc);return {...o,status:normSt(o.status),goal:o.goal||'',id:r.id,owner:r.owner,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}},
   meetings:async r=>({...await decJ(r.enc),id:r.id,author:r.author,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
   comments:async r=>({...await decJ(r.enc),id:r.id,type:r.task_id?'task':'meeting',target:r.task_id||r.meeting_id,author:r.author,createdAt:Date.parse(r.created_at)}),
   tf_reports:async r=>({...await decJ(r.enc),id:r.id,createdBy:r.created_by,createdAt:Date.parse(r.created_at),updatedAt:Date.parse(r.updated_at)}),
@@ -208,19 +211,21 @@ function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeou
 
 /* ============ 잡스케줄러 ============ */
 const scoped=()=>[...S.tasks.values()].filter(t=>S.scope==='all'||t.owner===S.me.id);
-const isLate=t=>t.status==='todo'&&t.date<todayStr();
+const isOpen=t=>t.status==='progress'||t.status==='hold';
+const isLate=t=>isOpen(t)&&t.date<todayStr();
 function taskRow(t,showOwner){
   const ed=canEditTask(t);
   return `<div class="trow ${t.status==='done'?'isdone':''}">
-    <button class="chk" role="checkbox" aria-checked="${t.status==='done'}" aria-label="완료 표시" data-toggle="${esc(t.id)}" ${ed?'':'disabled'}>${t.status==='done'?'✓':''}</button>
+    <button class="chk" role="checkbox" aria-checked="${t.status==='done'}" aria-label="완료 표시" title="완료 표시 / 진행중으로 되돌리기" data-toggle="${esc(t.id)}" ${ed?'':'disabled'}>${t.status==='done'?'✓':''}</button>
     <div style="min-width:0"><button class="ttl" data-edit="${esc(t.id)}">${esc(t.title)}</button>
-      <div class="meta"><span class="jid">${esc(t.id)}</span>${t.status==='done'?'<span class="st done">한 일</span>':isLate(t)?'<span class="st late">기한 지남</span>':'<span class="st todo">할 일</span>'}${showOwner?`<span>${esc(nameOf(t.owner))}</span>`:''}${cCount('task',t.id)?`<span>코멘트 ${cCount('task',t.id)}</span>`:''}</div></div></div>`;
+      ${t.goal?`<div class="goal">목표 · ${esc(clip(t.goal,70))}</div>`:''}
+      <div class="meta"><span class="jid">${esc(t.id)}</span>${stBadge(t)}${isLate(t)?'<span class="st late">완료일 경과</span>':''}${showOwner?`<span>${esc(nameOf(t.owner))}</span>`:''}${cCount('task',t.id)?`<span>코멘트 ${cCount('task',t.id)}</span>`:''}</div></div></div>`;
 }
 function vSched(){
   const m=S.month,y=m.getFullYear(),mo=m.getMonth();
   const start=addDays(m,-m.getDay()),cells=[];
   const list=scoped(),byDate={};list.forEach(t=>(byDate[t.date]??=[]).push(t));
-  Object.values(byDate).forEach(a=>a.sort((p,q)=>(p.status===q.status?0:p.status==='todo'?-1:1)||p.title.localeCompare(q.title)));
+  Object.values(byDate).forEach(a=>a.sort((p,q)=>(ST_ORDER.indexOf(p.status)-ST_ORDER.indexOf(q.status))||p.title.localeCompare(q.title)));
   const today=todayStr();
   for(let i=0;i<42;i++){const d=addDays(start,i),k=ymd(d);if(i>=35&&d.getMonth()!==mo)break;
     const ts=byDate[k]||[];
@@ -237,20 +242,20 @@ function vSched(){
     <button class="btn primary" data-new="1">+ 업무 등록</button></div>
   <div class="sched"><div class="panel" style="overflow:hidden">
       <div class="cal">${DOW.map((d,i)=>`<div class="dow ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('')}${cells.join('')}</div>
-      <div class="legend" style="padding:10px 14px"><span><i style="background:var(--todo)"></i>할 일</span><span><i style="background:var(--done)"></i>한 일</span><span class="mono">${y}.${pad(mo+1)} · 한 일 ${inMonth.filter(t=>t.status==='done').length} · 할 일 ${inMonth.filter(t=>t.status==='todo').length}</span></div>
+      <div class="legend" style="padding:10px 14px">${ST_ORDER.map(k=>`<span><i class="lg-${k}"></i>${ST[k]} ${inMonth.filter(t=>t.status===k).length}</span>`).join('')}<span class="mono">${y}.${pad(mo+1)} · 완료일 기준</span></div>
     </div>
     <div class="stack">
       <div class="panel"><div class="panel-h"><h2>${sd.getMonth()+1}월 ${sd.getDate()}일 (${DOW[sd.getDay()]})</h2><span style="flex:1"></span><button class="btn sm" data-new="${S.sel}">+ 이 날짜에 등록</button></div>
-        <div class="panel-b" style="padding-block:4px">${dayT.length?`<div class="tlist">${dayT.map(t=>taskRow(t,S.scope==='all')).join('')}</div>`:`<div class="empty">등록된 업무가 없습니다.<br>할 일이나 한 일을 기록해 보세요.</div>`}</div></div>
-      <div class="panel"><div class="panel-h"><h2>기한 지난 할 일</h2><span class="st late">${late.length}</span></div>
-        <div class="panel-b" style="padding-block:4px">${late.length?`<div class="tlist">${late.slice(0,8).map(t=>taskRow(t,S.scope==='all').replace('<div class="meta">',`<div class="meta"><span class="mono">${fmtMD(t.date)}</span>`)).join('')}</div>${late.length>8?`<p class="muted" style="font-size:12px">외 ${late.length-8}건</p>`:''}`:`<div class="empty">밀린 할 일이 없습니다.</div>`}</div></div>
+        <div class="panel-b" style="padding-block:4px">${dayT.length?`<div class="tlist">${dayT.map(t=>taskRow(t,S.scope==='all')).join('')}</div>`:`<div class="empty">등록된 업무가 없습니다.<br>완료일·목표를 정해 업무를 등록하고 진행 과정을 기록해 보세요.</div>`}</div></div>
+      <div class="panel"><div class="panel-h"><h2>완료일 경과 업무</h2><span class="st late">${late.length}</span></div>
+        <div class="panel-b" style="padding-block:4px">${late.length?`<div class="tlist">${late.slice(0,8).map(t=>taskRow(t,S.scope==='all').replace('<div class="meta">',`<div class="meta"><span class="mono">${fmtMD(t.date)}</span>`)).join('')}</div>${late.length>8?`<p class="muted" style="font-size:12px">외 ${late.length-8}건</p>`:''}`:`<div class="empty">완료일이 지난 진행중·보류 업무가 없습니다.</div>`}</div></div>
     </div></div>`;
 }
-const taskPayload=t=>({title:t.title,date:t.date,status:t.status,detail:t.detail||'',doneAt:t.doneAt||null});
+const taskPayload=t=>({title:t.title,date:t.date,goal:t.goal||'',status:t.status,detail:t.detail||'',doneAt:t.doneAt||null});
 async function toggleTask(id){
   const t=S.tasks.get(id);if(!t||!canEditTask(t))return;
-  const n={...t,status:t.status==='done'?'todo':'done',doneAt:t.status==='done'?null:Date.now()};
-  try{const r=await safe(async()=>sb.from('tasks').update({enc:await encJ(taskPayload(n))}).eq('id',id).select().single(),n.status==='done'?'한 일로 옮겼습니다':'할 일로 되돌렸습니다');await upsertLocal('tasks',r.data)}catch{}
+  const n={...t,status:t.status==='done'?'progress':'done',doneAt:t.status==='done'?null:Date.now()};
+  try{const r=await safe(async()=>sb.from('tasks').update({enc:await encJ(taskPayload(n))}).eq('id',id).select().single(),n.status==='done'?'완료로 표시했습니다':'진행중으로 되돌렸습니다');await upsertLocal('tasks',r.data)}catch{}
 }
 function bindTaskRows(){
   document.querySelectorAll('[data-toggle]').forEach(b=>b.onclick=()=>toggleTask(b.dataset.toggle));
@@ -296,21 +301,21 @@ function vReport(){
   const all=[...S.tasks.values()].filter(t=>t.date>=p.s&&t.date<=p.e&&(S.rep.member==='all'||t.owner===S.rep.member));
   const members=[...new Set(all.map(t=>t.owner))].sort((a,b)=>nameOf(a).localeCompare(nameOf(b),'ko'));
   const accs=[...S.accounts.values()].sort((a,b)=>a.name.localeCompare(b.name,'ko'));
-  const done=all.filter(t=>t.status==='done'),todo=all.filter(t=>t.status==='todo');
+  const cnt=k=>all.filter(t=>t.status===k).length;
   const cmts=all.reduce((n,t)=>n+cCount('task',t.id),0);
-  const item=t=>`<div class="ritem"><div class="meta" style="margin:0 0 3px"><span class="jid">${esc(t.id)}</span><span class="mono">${fmtMD(t.date)}</span>${isLate(t)?'<span class="st late">기한 지남</span>':''}</div>
-    <div class="t">${canEditTask(t)?`<button class="ttl" data-edit="${esc(t.id)}">${esc(t.title)}</button>`:esc(t.title)}</div>${t.detail?`<div class="d">${esc(t.detail)}</div>`:''}${thread('task',t.id)}</div>`;
+  const item=t=>`<div class="ritem"><div class="meta" style="margin:0 0 3px"><span class="jid">${esc(t.id)}</span><span class="mono">완료일 ${fmtMD(t.date)}</span>${isLate(t)?'<span class="st late">완료일 경과</span>':''}</div>
+    <div class="t">${canEditTask(t)?`<button class="ttl" data-edit="${esc(t.id)}">${esc(t.title)}</button>`:esc(t.title)}</div>${t.goal?`<div class="goal">목표 · ${esc(t.goal)}</div>`:''}${t.detail?`<div class="d">${esc(t.detail)}</div>`:''}${thread('task',t.id)}</div>`;
   const sortD=a=>a.sort((x,y)=>x.date.localeCompare(y.date)||x.title.localeCompare(y.title));
   return `<div class="vhead"><h1>업무 Report</h1>
     <div class="seg" role="group" aria-label="기간 단위"><button data-rmode="week" aria-pressed="${S.rep.mode==='week'}">주간</button><button data-rmode="month" aria-pressed="${S.rep.mode==='month'}">월간</button></div>
     <div class="navg"><button class="iconbtn" data-rnav="-1" aria-label="이전">‹</button><span class="lbl mono">${p.label}</span><button class="iconbtn" data-rnav="1" aria-label="다음">›</button></div>
     <button class="btn sm" data-rnav="0">이번 ${S.rep.mode==='week'?'주':'달'}</button><span class="sp"></span>
     <select class="input" id="rMember" style="width:auto" aria-label="담당자"><option value="all">전체 담당자</option>${accs.map(a=>`<option value="${a.id}" ${S.rep.member===a.id?'selected':''}>${esc(a.name)}</option>`).join('')}</select></div>
-  <div class="rsum"><span>한 일 <b>${done.length}</b>건</span><span>할 일 <b>${todo.length}</b>건</span><span>기한 지남 <b>${todo.filter(isLate).length}</b>건</span><span>코멘트 <b>${cmts}</b>개</span></div>
-  ${members.length?members.map(mid=>{const mt=all.filter(t=>t.owner===mid),d=sortD(mt.filter(t=>t.status==='done')),tdo=sortD(mt.filter(t=>t.status==='todo'));
-    return `<section class="panel member"><div class="panel-h"><h2>${esc(nameOf(mid))}</h2><span class="cnt"><span class="st done">한 일 ${d.length}</span><span class="st todo">할 일 ${tdo.length}</span></span></div>
-    <div class="rcols"><div class="rcol"><h3>한 일</h3>${d.length?d.map(item).join(''):'<div class="empty">기록 없음</div>'}</div><div class="rcol"><h3>할 일</h3>${tdo.length?tdo.map(item).join(''):'<div class="empty">기록 없음</div>'}</div></div></section>`}).join('')
-  :`<div class="panel"><div class="empty">이 기간에 입력된 업무가 없습니다.<br>잡스케줄러에서 한 일·할 일을 등록하면 이곳에 업무 단위로 정리되고, 항목마다 코멘트를 남길 수 있습니다.</div></div>`}`;
+  <div class="rsum">${['done','progress','hold','fail'].map(k=>`<span>${ST[k]} <b>${cnt(k)}</b>건</span>`).join('')}<span>완료일 경과 <b>${all.filter(isLate).length}</b>건</span><span>코멘트 <b>${cmts}</b>개</span></div>
+  ${members.length?members.map(mid=>{const mt=all.filter(t=>t.owner===mid),G={};['progress','done','hold','fail'].forEach(k=>G[k]=sortD(mt.filter(t=>t.status===k)));
+    return `<section class="panel member"><div class="panel-h"><h2>${esc(nameOf(mid))}</h2><span class="cnt">${['progress','done','hold','fail'].filter(k=>G[k].length).map(k=>`<span class="st ${k}">${ST[k]} ${G[k].length}</span>`).join('')}</span></div>
+    <div class="rcols q4">${['progress','done','hold','fail'].map(k=>`<div class="rcol"><h3>${ST[k]}</h3>${G[k].length?G[k].map(item).join(''):'<div class="empty">기록 없음</div>'}</div>`).join('')}</div></section>`}).join('')
+  :`<div class="panel"><div class="empty">이 기간에 입력된 업무가 없습니다.<br>잡스케줄러에서 업무(완료일·목표·진행사항)를 등록하면 이곳에 업무 단위로 정리되고, 항목마다 코멘트를 남길 수 있습니다.</div></div>`}`;
 }
 bind.report=()=>{
   document.querySelectorAll('[data-rmode]').forEach(b=>b.onclick=()=>{S.rep.mode=b.dataset.rmode;render()});
@@ -382,8 +387,8 @@ function vAdmin(){
         <button class="btn sm danger" data-adel="${a.id}">삭제</button>`}</div></td></tr>`).join('')}
     </tbody></table></div></section>
   <section class="panel" style="overflow:hidden"><div class="panel-h"><h2>업무ID 관리</h2><span class="muted" style="font-size:12.5px">${S.tasks.size}건</span><span style="flex:1"></span><input class="input" id="admQ" type="search" placeholder="업무ID·제목·담당자 검색" value="${esc(S.admQ)}" style="max-width:260px" aria-label="업무 검색"></div>
-    <div class="tblwrap"><table class="tbl"><thead><tr><th>업무ID</th><th>일자</th><th>담당자</th><th>제목</th><th>구분</th><th>코멘트</th><th></th></tr></thead><tbody>
-    ${ts.length?ts.slice(0,300).map(t=>`<tr><td class="mono">${esc(t.id)}</td><td class="mono">${esc(t.date)}</td><td>${esc(nameOf(t.owner))}</td><td class="wrap-t">${esc(t.title)}</td><td>${t.status==='done'?'<span class="st done">한 일</span>':'<span class="st todo">할 일</span>'}</td><td class="mono">${cCount('task',t.id)}</td>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>업무ID</th><th>완료일</th><th>담당자</th><th>업무명</th><th>진행사항</th><th>코멘트</th><th></th></tr></thead><tbody>
+    ${ts.length?ts.slice(0,300).map(t=>`<tr><td class="mono">${esc(t.id)}</td><td class="mono">${esc(t.date)}</td><td>${esc(nameOf(t.owner))}</td><td class="wrap-t">${esc(t.title)}</td><td>${stBadge(t)}</td><td class="mono">${cCount('task',t.id)}</td>
       <td><div class="acts"><button class="btn sm" data-edit="${esc(t.id)}">수정</button><button class="btn sm danger" data-tdel="${esc(t.id)}">삭제</button></div></td></tr>`).join(''):`<tr><td colspan="7"><div class="empty">${q?'검색 결과가 없습니다.':'등록된 업무가 없습니다.'}</div></td></tr>`}
     </tbody></table></div>${ts.length>300?`<p class="muted panel-b" style="margin:0;font-size:12px">최근 300건만 표시합니다. 검색으로 좁혀 주세요.</p>`:''}</section>
   <section class="panel" style="overflow:hidden"><div class="panel-h"><h2>회의록 관리</h2><span class="muted" style="font-size:12.5px">${ms.length}건</span></div>
@@ -420,7 +425,7 @@ const md=s=>{const d=pYmd(s);return `${d.getMonth()+1}.${d.getDate()}`};
 const ymdDot=s=>s.replace(/-/g,'.');
 const korDate=d=>`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
 const clip=(s,n)=>{s=String(s||'').replace(/\s+/g,' ').trim();return s.length>n?s.slice(0,n-1)+'…':s};
-const firstLines=(s,n)=>String(s||'').split('\n').map(x=>x.replace(/^[\s\-•·*\d.)①-⑳]+/,'').trim()).filter(Boolean).slice(0,n);
+const firstLines=(s,n)=>String(s||'').split('\n').map(x=>x.replace(/^\s*(?:[-•·*]+|\d{1,2}[.)](?!\d)|[①-⑳])\s*/,'').trim()).filter(Boolean).slice(0,n);
 const newRptId=()=>{const d=new Date();return 'RPT-'+ymd(d).replace(/-/g,'')+'-'+rnd(4)};
 
 // 기간 내 업무·회의록·코멘트를 모아 요약 재료(facts)로 만듦
@@ -429,42 +434,43 @@ function collectFacts(s,e,member){
   const tasks=[...S.tasks.values()].filter(inP).sort((a,b)=>a.date.localeCompare(b.date));
   const days=Math.round((pYmd(e)-pYmd(s))/864e5)+1;
   const ne=ymd(addDays(pYmd(e),days));
-  const next=[...S.tasks.values()].filter(t=>t.status==='todo'&&t.date>e&&t.date<=ne&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
-  const late=[...S.tasks.values()].filter(t=>t.status==='todo'&&t.date<=e&&t.date<todayStr()&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
+  const next=[...S.tasks.values()].filter(t=>isOpen(t)&&t.date>e&&t.date<=ne&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
+  const late=[...S.tasks.values()].filter(t=>isOpen(t)&&t.date<=e&&t.date<todayStr()&&(member==='all'||t.owner===member)).sort((a,b)=>a.date.localeCompare(b.date));
   const meetings=[...S.meetings.values()].filter(m=>m.date>=s&&m.date<=e).sort((a,b)=>(a.date+(a.time||'')).localeCompare(b.date+(b.time||'')));
   const cm=id=>cList('task',id).map(c=>({by:c.authorName||nameOf(c.author),at:fmtDT(c.createdAt),text:c.text}));
   const mcm=id=>cList('meeting',id).map(c=>({by:c.authorName||nameOf(c.author),at:fmtDT(c.createdAt),text:c.text}));
   return {period:{start:s,end:e,days},nextEnd:ne,members:[...new Set(tasks.map(t=>t.owner))].length,
-    tasks:tasks.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),status:t.status==='done'?'한 일':'할 일',title:t.title,detail:t.detail||'',overdue:isLate(t),comments:cm(t.id)})),
-    overdue:late.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title})),
-    nextPlans:next.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title})),
+    tasks:tasks.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),status:ST[t.status],title:t.title,goal:t.goal||'',detail:t.detail||'',overdue:isLate(t),comments:cm(t.id)})),
+    overdue:late.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title,status:ST[t.status]})),
+    nextPlans:next.map(t=>({id:t.id,date:t.date,owner:nameOf(t.owner),title:t.title,goal:t.goal||''})),
     meetings:meetings.map(m=>({id:m.id,date:m.date,time:m.time||'',title:m.title,place:m.place||'',attendees:m.attendees||'',agenda:m.agenda||'',content:m.content||'',decisions:m.decisions||'',actions:m.actions||'',comments:mcm(m.id)}))};
 }
 
 // 규칙 기반 초안 (AI 미사용 시)
 function draftReport(title,s,e,member){
   const F=collectFacts(s,e,member);
-  const done=F.tasks.filter(t=>t.status==='한 일'),todo=F.tasks.filter(t=>t.status==='할 일');
+  const done=F.tasks.filter(t=>t.status===ST.done),todo=F.tasks.filter(t=>t.status===ST.progress),hold=F.tasks.filter(t=>t.status===ST.hold),fail=F.tasks.filter(t=>t.status===ST.fail);
   const cmCount=F.tasks.reduce((n,t)=>n+t.comments.length,0);
   const pLabel=`${ymdDot(s)} ~ ${ymdDot(e)}`;
   const byOwner=list=>{const g={};list.forEach(t=>(g[t.owner]??=[]).push(t));return Object.entries(g).sort((a,b)=>a[0].localeCompare(b[0],'ko'))};
   const summary=[];
-  summary.push(F.tasks.length?`보고 기간(${pLabel}) TF 업무는 총 ${F.tasks.length}건으로 완료 ${done.length}건, 진행 ${todo.length}건이며 기한이 지난 할 일은 ${F.overdue.length}건임`:`보고 기간(${pLabel})에 등록된 TF 업무는 없음`);
+  summary.push(F.tasks.length?`보고 기간(${pLabel}) TF 업무는 총 ${F.tasks.length}건으로 완료 ${done.length}건, 진행중 ${todo.length}건, 보류 ${hold.length}건, 실패 ${fail.length}건이며 완료일이 지난 미완료 업무는 ${F.overdue.length}건임`:`보고 기간(${pLabel})에 등록된 TF 업무는 없음`);
   if(F.meetings.length){const dec=F.meetings.flatMap(m=>firstLines(m.decisions,2)).slice(0,2);
     summary.push(`회의 ${F.meetings.length}회 진행(${F.meetings.slice(0,3).map(m=>m.title).join(', ')}${F.meetings.length>3?' 등':''})${dec.length?'. 주요 결정은 '+dec.join(', ')+'임':'함'}`);}
   else summary.push('보고 기간에 기록된 회의는 없음');
   if(F.nextPlans.length) summary.push(`차기 주요 계획은 ${F.nextPlans.slice(0,3).map(t=>t.title).join(', ')}${F.nextPlans.length>3?` 외 ${F.nextPlans.length-3}건`:''}이며 ${ymdDot(F.nextEnd)}까지 진행 예정임`);
-  if(F.overdue.length) summary.push(`기한 경과 업무 ${F.overdue.length}건(${F.overdue.slice(0,2).map(t=>t.title).join(', ')}${F.overdue.length>2?' 등':''})은 일정 재조정이 필요함`);
+  if(F.overdue.length) summary.push(`완료일 경과 업무 ${F.overdue.length}건(${F.overdue.slice(0,2).map(t=>t.title).join(', ')}${F.overdue.length>2?' 등':''})은 일정 재조정이 필요함`);
   if(cmCount) summary.push(`업무 코멘트 ${cmCount}건이 기록되었으며 주요 이슈는 3장에 정리함`);
 
   const sec=[];
   sec.push({title:'1. 보고 개요',body:[`① 보고 기간 : ${pLabel} (${F.period.days}일)`,`② 대상 : ${member==='all'?'TF 전원':nameOf(member)} (업무 등록 인원 ${F.members}명)`,`③ 집계 기준 : 잡스케줄러 업무 일자, 회의록 회의 일자 기준`].join('\n')});
-  {const L=[];byOwner(done).forEach(([o,ts],i)=>{L.push(`${i+1}) ${o} (${ts.length}건)`);ts.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (${md(t.date)})${t.detail?' : '+clip(firstLines(t.detail,1)[0]||'',80):''}`))});
+  {const L=[];byOwner(done).forEach(([o,ts],i)=>{L.push(`${i+1}) ${o} (${ts.length}건)`);ts.forEach((t,j)=>{L.push(`${circ(j)} ${t.title} (완료 ${md(t.date)})`);if(t.goal)L.push(`- 목표 : ${clip(firstLines(t.goal,1)[0]||'',90)}`);{const r=firstLines(t.detail,99).pop();if(r)L.push(`- 최근 경과 : ${clip(r,90)}`)}})});
     sec.push({title:'2. 주요 성과',body:L.length?L.join('\n'):'보고 기간에 완료된 업무 없음'});}
   {const L=[];let k=1;
-    if(todo.length){L.push(`${k++}) 진행 중 업무 (${todo.length}건)`);todo.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, ${md(t.date)}${t.overdue?' (기한 경과)':''}`))}
+    if(todo.length){L.push(`${k++}) 진행중 업무 (${todo.length}건)`);todo.forEach((t,j)=>{L.push(`${circ(j)} ${t.title} : ${t.owner}, 완료일 ${md(t.date)}${t.overdue?' (경과)':''}`);if(t.goal)L.push(`- 목표 : ${clip(firstLines(t.goal,1)[0]||'',90)}`)})}
+    [[hold,'보류'],[fail,'실패']].forEach(([arr,lb])=>{if(arr.length){L.push(`${k++}) ${lb} 업무 (${arr.length}건)`);arr.forEach((t,j)=>{L.push(`${circ(j)} ${t.title} : ${t.owner}, 완료일 ${md(t.date)}`);const r=firstLines(t.detail,99).pop();if(r)L.push(`- 사유·경과 : ${clip(r,90)}`)})}});
     const lateOut=F.overdue.filter(t=>t.date<s);
-    if(lateOut.length){L.push(`${k++}) 이전 기간 미완료 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, 기한 ${md(t.date)}`))}
+    if(lateOut.length){L.push(`${k++}) 이전 기간 미완료 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, 완료일 ${md(t.date)} (${t.status})`))}
     const withC=F.tasks.filter(t=>t.comments.length);
     if(withC.length){L.push(`${k++}) 코멘트 이슈`);withC.slice(0,10).forEach((t,j)=>{const c=t.comments[t.comments.length-1];L.push(`${circ(j)} ${t.title} : ${clip(c.text,90)} (${c.by})`)})}
     sec.push({title:'3. 진행 현황 및 이슈',body:L.length?L.join('\n'):'특이 이슈 없음'});}
@@ -477,7 +483,7 @@ function draftReport(title,s,e,member){
     sec.push({title:'5. 향후 계획',body:L.length?L.join('\n'):`${ymdDot(F.nextEnd)}까지 등록된 차기 계획 없음`});}
 
   const appendix=[];
-  if(F.tasks.length)appendix.push({title:'업무 목록',head:['업무ID','일자','담당','업무명','구분'],rows:F.tasks.map(t=>[t.id,ymdDot(t.date),t.owner,t.title,t.status+(t.overdue?'(경과)':'')])});
+  if(F.tasks.length)appendix.push({title:'업무 목록',head:['업무ID','완료일','담당','업무명','목표','진행사항'],rows:F.tasks.map(t=>[t.id,ymdDot(t.date),t.owner,t.title,clip(firstLines(t.goal,1)[0]||'',60),t.status+(t.overdue?'(경과)':'')])});
   if(F.meetings.length)appendix.push({title:'회의 목록',head:['일자','회의명','참석자','결정사항'],rows:F.meetings.map(m=>[ymdDot(m.date),m.title,clip(m.attendees,40),clip(firstLines(m.decisions,3).join(' / '),120)])});
   return {v:1,title,period:{s,e},member,dateLine:`보고일 : ${korDate(new Date())}`,metaLine:`보고기간 : ${pLabel} · 대상 : ${member==='all'?'TF 전원':nameOf(member)}`,summary,sections:sec,appendix};
 }
@@ -597,7 +603,7 @@ async function loadRevisions(id){try{const{data}=await sb.from('tf_report_revisi
 function modalNewReport(){
   const t=new Date(),ws=weekStart(t);
   openModal(`<form id="fNR"><div class="mh"><h2>보고서 생성</h2></div><div class="mb">
-    <p class="muted" style="margin:0;font-size:13px">선택한 기간의 업무 Report(한 일·할 일·코멘트)와 회의록을 모아 보고서 초안을 만듭니다. 초안은 화면에서 수정한 뒤 저장합니다.</p>
+    <p class="muted" style="margin:0;font-size:13px">선택한 기간의 업무 Report(업무·목표·진행사항·코멘트)와 회의록을 모아 보고서 초안을 만듭니다. 초안은 화면에서 수정한 뒤 저장합니다.</p>
     <div class="field"><label for="nr_title">보고서 제목</label><input class="input" id="nr_title" value="닥터빌 TF 업무 보고의 건" required maxlength="120"></div>
     <div class="field"><label>기간</label><div class="seg" role="group">${[['tw','이번 주'],['lw','지난 주'],['tm','이번 달'],['lm','지난 달']].map(([k,l])=>`<button type="button" data-pq="${k}">${l}</button>`).join('')}</div></div>
     <div class="g2"><div class="field"><label for="nr_s">시작일</label><input class="input" id="nr_s" type="date" value="${ymd(ws)}" required></div>
@@ -688,13 +694,14 @@ function confirmBox(title,msg,fn_){
 }
 function modalTask(t,date){
   const isNew=!t,ed=isNew||canEditTask(t);
-  const st=t?.status||(date&&date<todayStr()?'done':'todo');
+  const st=t?.status||'progress';
   openModal(`<form id="fTask"><div class="mh"><h2>${isNew?'업무 등록':ed?'업무 수정':'업무 보기'}</h2>${t?`<span class="jid">${esc(t.id)}</span>`:''}</div>
     <div class="mb">
       <div class="field"><label for="tk_title">업무명</label><input class="input" id="tk_title" required maxlength="120" value="${esc(t?.title||'')}" ${ed?'':'readonly'}></div>
-      <div class="g2"><div class="field"><label for="tk_date">일자</label><input class="input" id="tk_date" type="date" required value="${esc(t?.date||date||todayStr())}" ${ed?'':'readonly'}></div>
-        <div class="field"><label>구분</label><div class="seg" role="radiogroup">${[['todo','할 일'],['done','한 일']].map(([k,l])=>`<button type="button" role="radio" data-st="${k}" aria-pressed="${st===k}" aria-checked="${st===k}" ${ed?'':'disabled'}>${l}</button>`).join('')}</div></div></div>
-      <div class="field"><label for="tk_detail">상세 내용</label><textarea class="input" id="tk_detail" rows="5" maxlength="5000" placeholder="진행 내용, 산출물, 협의 대상 등" ${ed?'':'readonly'}>${esc(t?.detail||'')}</textarea></div>
+      <div class="g2"><div class="field"><label for="tk_date">완료일</label><input class="input" id="tk_date" type="date" required value="${esc(t?.date||date||todayStr())}" ${ed?'':'readonly'}></div>
+        <div class="field"><label>진행사항</label><div class="seg" role="radiogroup" aria-label="진행사항">${['progress','done','hold','fail'].map(k=>[k,ST[k]]).map(([k,l])=>`<button type="button" role="radio" data-st="${k}" aria-pressed="${st===k}" aria-checked="${st===k}" ${ed?'':'disabled'}>${l}</button>`).join('')}</div></div></div>
+      <div class="field"><label for="tk_goal">목표</label><textarea class="input" id="tk_goal" rows="2" maxlength="1000" placeholder="완료일까지 달성할 목표 (예: 협력사 3곳 제안서 접수)" ${ed?'':'readonly'}>${esc(t?.goal||'')}</textarea></div>
+      <div class="field"><label for="tk_detail">상세 내용</label><textarea class="input" id="tk_detail" rows="6" maxlength="5000" placeholder="진행 과정 중 있었던 일을 날짜와 함께 기록 (예: 10/16 협력사 A 유선 협의 — 단가 재견적 요청)" ${ed?'':'readonly'}>${esc(t?.detail||'')}</textarea></div>
       ${t?`<p class="muted" style="margin:0;font-size:12px">담당 ${esc(nameOf(t.owner))} · 등록 <span class="mono">${fmtDT(t.createdAt)}</span>${t.doneAt?` · 완료 <span class="mono">${fmtDT(t.doneAt)}</span>`:''}</p>`:''}
     </div>
     <div class="mf">${t&&ed?`<button type="button" class="btn danger" id="tkDel">삭제</button>`:''}<span class="sp"></span><button type="button" class="btn" data-close>${ed?'취소':'닫기'}</button>${ed?`<button type="submit" class="btn primary" id="tkSave">${isNew?'등록':'저장'}</button>`:''}</div></form>`);
@@ -703,7 +710,7 @@ function modalTask(t,date){
   if($('#tkDel'))$('#tkDel').onclick=()=>confirmBox(`${t.id} 업무를 삭제할까요?`,`‘${t.title}’과 달린 코멘트 ${cCount('task',t.id)}개가 함께 삭제됩니다.`,()=>delRow('tasks',t.id,'업무를 삭제했습니다'));
   $('#fTask').onsubmit=async ev=>{ev.preventDefault();if(!ed)return;$('#tkSave').disabled=true;
     const d=$('#tk_date').value;
-    const pl={title:$('#tk_title').value.trim(),date:d,status,detail:$('#tk_detail').value.trim(),doneAt:status==='done'?(t?.doneAt||Date.now()):null};
+    const pl={title:$('#tk_title').value.trim(),date:d,goal:$('#tk_goal').value.trim(),status,detail:$('#tk_detail').value.trim(),doneAt:status==='done'?(t?.doneAt||Date.now()):null};
     try{
       const enc=await encJ(pl);
       const r=isNew
