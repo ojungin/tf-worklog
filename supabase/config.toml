@@ -1,0 +1,6 @@
+# Supabase CLI 설정 (배포용 최소 구성)
+project_id = "tf-worklog"
+
+[functions.admin-users]
+# 호출자 인증은 함수 코드에서 직접 검증합니다 (최초 관리자 생성은 비로그인 호출).
+verify_jwt = false
