@@ -650,6 +650,24 @@ function buildMetrics(M,e){
 }
 
 // 규칙 기반 초안 (AI 미사용 시)
+// 4. 진행 사항 : 요약 없이 입력된 한 일·할 일을 주요 업무 › 진행 업무별로 전부 수합 (Claude 요약 시에도 그대로 유지)
+function progressBody(F){
+  const L=[];let k=0;const ln=t=>String(t||'').split('\n').map(x=>x.replace(/^\s*(?:[-•·*]|\d+[.)]|[①-⑳])\s*/,'').trim()).filter(Boolean);
+  F.goals.forEach(g=>{const ws=g.works.filter(w=>w.records.length);if(!ws.length)return;
+    L.push(`${++k}) ${g.cat?'['+g.cat+'] ':''}${g.title}${g.status?` (${g.status}${g.due?', 완료일 '+md(g.due):''})`:''}`);
+    ws.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} (${w.status}${w.overdue?'·경과':''}, ${w.owner}${w.due?', 완료일 '+md(w.due):''})`);
+      const D=[],T=[];w.records.forEach(r=>{const who=r.owner!==w.owner?`, ${r.owner}`:'';
+        ln(r.done).forEach(x=>D.push(`- 한 일 (${md(r.date)}${who}) ${x}`));ln(r.todo).forEach(x=>T.push(`- 할 일 (${md(r.date)}${who}) ${x}`));
+        r.comments.forEach(c=>D.push(`※ 코멘트 (${c.by}) ${c.text.replace(/\s*\n\s*/g,' ')}`))});
+      w.meetingComments.forEach(c=>D.push(`※ 회의 코멘트 (${c.meeting}, ${c.by}) ${c.text.replace(/\s*\n\s*/g,' ')}`));
+      L.push(...D,...T)})});
+  const shown=new Set(F.goals.flatMap(g=>g.works.filter(w=>w.records.length).map(w=>w.title+'|'+g.title)));
+  const lateOut=F.overdue.filter(t=>!shown.has(t.title+'|'+t.goal));
+  if(lateOut.length){L.push(`${++k}) 기록 없는 완료일 경과 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (${t.status}, ${t.owner}, 완료일 ${md(t.due)})`))}
+  if(F.meetings.length){L.push(`${++k}) 회의 결정사항`);F.meetings.forEach((m,j)=>{L.push(`${circ(j)} ${m.title} (${md(m.date)})`);
+    ln(m.decisions).forEach(x=>L.push(`- ${x}`));ln(m.actions).forEach(x=>L.push(`- 후속 조치 : ${x}`))})}
+  return L.length?L.join('\n'):'보고 기간에 입력된 업무 기록 없음';
+}
 function draftReport(title,s,e,member){
   const F=collectFacts(s,e,member);
   const works=F.goals.flatMap(g=>g.works.map(w=>({...w,goal:g.title})));
@@ -667,38 +685,21 @@ function draftReport(title,s,e,member){
   else summary.push('보고 기간에 기록된 회의는 없음');
   if(F.nextPlans.length) summary.push(`차기 완료 예정 업무는 ${F.nextPlans.slice(0,3).map(t=>t.title).join(', ')}${F.nextPlans.length>3?` 외 ${F.nextPlans.length-3}건`:''}이며 ${ymdDot(F.nextEnd)}까지 진행 예정임`);
   if(F.overdue.length) summary.push(`완료일 경과 진행 업무 ${F.overdue.length}건(${F.overdue.slice(0,2).map(t=>t.title).join(', ')}${F.overdue.length>2?' 등':''})은 일정 재조정이 필요함`);
-  if(cmN) summary.push(`업무·회의 코멘트 ${cmN}건이 기록되었으며 주요 이슈는 4장에 정리함`);
+  if(cmN) summary.push(`업무·회의 코멘트 ${cmN}건이 기록되었으며 4장 진행 사항에 원문으로 수합함`);
 
   const MT=buildMetrics(S.metrics,e);
   if(MT.sum)summary.unshift(MT.sum);
   const sec=[];
   sec.push({title:'1. 보고 개요',body:[`① 보고 기간 : ${pLabel} (${F.period.days}일)`,`② 대상 : ${member==='all'?'TF 전원':nameOf(member)} (기록 인원 ${F.members}명)`,`③ 업무 집계 기준 : 업무 기록일·진행 업무 완료일, 회의 일자 기준`,`④ 실적 집계 기준 : ${e.slice(0,4)}년 1월 ~ ${+e.slice(5,7)}월 (Dashboard_DV 월별 집계)`].join('\n')});
   sec.push({title:'2. 실적',body:MT.body,tables:MT.tables});
+  // 3. 주요 성과 : 완료된 진행 업무 요약 (Claude 요약 시 문장으로 정리)
   {const L=[];let i=0;F.goals.forEach(g=>{const ds=g.works.filter(w=>w.status===ST.done);if(!ds.length)return;
       L.push(`${++i}) ${g.cat?'['+g.cat+'] ':''}${g.title}${g.status===ST.done?' (목표 달성)':''}`);
-      ds.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} (완료${w.due?' '+md(w.due):''}, ${w.owner})`);const d=last(w,'done');if(d)L.push(`- 한 일 : ${clip(d,90)}`)})});
+      ds.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} (완료${w.due?' '+md(w.due):''}, ${w.owner})`);
+        const dn=w.records.flatMap(r=>firstLines(r.done,99));if(dn.length)L.push(`- ${clip(dn.slice(-3).join(', '),160)}${dn.length>3?` 외 ${dn.length-3}건`:''}`)})});
     sec.push({title:'3. 주요 성과',body:L.length?L.join('\n'):'보고 기간에 완료된 진행 업무 없음'});}
-  {const L=[];let k=0;
-    F.goals.forEach(g=>{const os=g.works.filter(w=>w.status!==ST.done);if(!os.length)return;
-      L.push(`${++k}) ${g.cat?'['+g.cat+'] ':''}${g.title}${g.due?` (완료일 ${md(g.due)})`:''}`);
-      os.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} : ${w.status}, ${w.owner}${w.due?`, 완료일 ${md(w.due)}`:''}${w.overdue?' (경과)':''}`);
-        const d=last(w,'done');if(d)L.push(`- ${w.status===ST.hold||w.status===ST.fail?'사유·경과':'한 일'} : ${clip(d,90)}`);
-        const t=last(w,'todo');if(t&&w.status!==ST.fail)L.push(`- 할 일 : ${clip(t,90)}`)})});
-    const shown=new Set(works.map(w=>w.title+'|'+w.goal));
-    const lateOut=F.overdue.filter(t=>!shown.has(t.title+'|'+t.goal));
-    if(lateOut.length){L.push(`${++k}) 이전 기간 미완료 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} : ${t.owner}, 완료일 ${md(t.due)} (${t.status})`))}
-    const iss=[];works.forEach(w=>{w.records.forEach(r=>r.comments.forEach(c=>iss.push({w:w.title,c})));w.meetingComments.forEach(c=>iss.push({w:w.title,c,mt:c.meeting}))});
-    if(iss.length){L.push(`${++k}) 코멘트 이슈`);iss.slice(-10).forEach((x,j)=>L.push(`${circ(j)} ${x.w} : ${clip(x.c.text,90)} (${x.c.by}${x.mt?', '+x.mt:''})`))}
-    if(F.meetings.length){L.push(`${++k}) 회의 결정사항`);F.meetings.forEach((m,j)=>{L.push(`${circ(j)} ${m.title} (${md(m.date)}${m.attendees?', 참석 : '+clip(m.attendees,40):''})`);
-      const d=firstLines(m.decisions,6),a=firstLines(m.actions,6);
-      if(!d.length&&!a.length&&!m.workComments.length)firstLines(m.content,2).forEach(x=>L.push(`- ${clip(x,100)}`));
-      d.forEach(x=>L.push(`- ${clip(x,120)}`));a.forEach(x=>L.push(`- 후속 조치 : ${clip(x,120)}`));
-      m.workComments.slice(0,6).forEach(c=>L.push(`- [${c.work}] ${clip(c.text,100)} (${c.by})`))})}
-    {const P=[];const seen=new Set();
-      F.goals.forEach(g=>g.works.filter(w=>w.status===ST.progress||w.status===ST.hold).forEach(w=>{const t=last(w,'todo');if(!t)return;seen.add(w.title+'|'+g.title);P.push(`${w.title}${w.due?` (~${md(w.due)})`:''} : ${clip(t,90)}`)}));
-      F.nextPlans.filter(t=>!seen.has(t.title+'|'+t.goal)).forEach(t=>P.push(`${t.title} (${md(t.due)} 완료 예정, ${t.owner})${t.todo?' : '+clip(firstLines(t.todo,99).pop()||'',80):''}`));
-      if(P.length){L.push(`${++k}) 향후 계획`);P.forEach((x,j)=>L.push(`${circ(j)} ${x}`))}}
-    sec.push({title:'4. 진행 사항',body:L.length?L.join('\n'):'특이 진행 사항 없음'});}
+  sec.push({title:'4. 진행 사항',body:progressBody(F)});
+
 
   const appendix=[];
   if(works.length)appendix.push({title:'업무 목록',head:['분류','주요 업무ID','주요 업무(목표)','진행 업무ID','진행 업무','담당','완료일','진행사항'],
@@ -877,7 +878,8 @@ async function aiSummarize(){
   try{
     const {data,error}=await sb.functions.invoke('ai-report',{body:{action:'summarize',facts:F}});
     if(error){let code='';try{code=(await error.context.json()).error}catch{}throw new Error({ai_not_configured:'API 키가 등록되지 않았습니다.',too_large:'자료가 너무 많습니다. 기간을 줄여 주세요.',admin_only:'관리자만 사용할 수 있습니다.'}[code]||'AI 요약에 실패했습니다'+(code?` (${code})`:''))}
-    d.summary=data.result.summary.map(String);d.sections=data.result.sections.map(s=>{const o={title:String(s.title||''),body:String(s.body||'')};if(/실적/.test(o.title)&&keepT.length)o.tables=keepT;return o});
+    d.summary=data.result.summary.map(String);d.sections=data.result.sections.map(s=>{const o={title:String(s.title||''),body:String(s.body||'')};if(/실적/.test(o.title)&&keepT.length)o.tables=keepT;if(/진행\s*사항/.test(o.title))o.body=progressBody(F);return o});
+    if(!d.sections.some(x=>/진행\s*사항/.test(x.title)))d.sections.push({title:'4. 진행 사항',body:progressBody(F)});
     S.rPrev=true;render();toast('Claude AI 요약을 반영했습니다. 내용을 확인한 뒤 저장하세요.');
   }catch(e){toast(e.message);render()}
 }
