@@ -650,23 +650,28 @@ function buildMetrics(M,e){
 }
 
 // 규칙 기반 초안 (AI 미사용 시)
-// 4. 진행 사항 : 요약 없이 입력된 한 일·할 일을 주요 업무 › 진행 업무별로 전부 수합 (Claude 요약 시에도 그대로 유지)
-function progressBody(F){
-  const L=[];let k=0;const ln=t=>String(t||'').split('\n').map(x=>x.replace(/^\s*(?:[-•·*]|\d+[.)]|[①-⑳])\s*/,'').trim()).filter(Boolean);
-  F.goals.forEach(g=>{const ws=g.works.filter(w=>w.records.length);if(!ws.length)return;
-    L.push(`${++k}) ${g.cat?'['+g.cat+'] ':''}${g.title}${g.status?` (${g.status}${g.due?', 완료일 '+md(g.due):''})`:''}`);
-    ws.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} (${w.status}${w.overdue?'·경과':''}, ${w.owner}${w.due?', 완료일 '+md(w.due):''})`);
-      const D=[],T=[];w.records.forEach(r=>{const who=r.owner!==w.owner?`, ${r.owner}`:'';
-        ln(r.done).forEach(x=>D.push(`- 한 일 (${md(r.date)}${who}) ${x}`));ln(r.todo).forEach(x=>T.push(`- 할 일 (${md(r.date)}${who}) ${x}`));
-        r.comments.forEach(c=>D.push(`※ 코멘트 (${c.by}) ${c.text.replace(/\s*\n\s*/g,' ')}`))});
-      w.meetingComments.forEach(c=>D.push(`※ 회의 코멘트 (${c.meeting}, ${c.by}) ${c.text.replace(/\s*\n\s*/g,' ')}`));
+// 기록 원문 → 줄 목록 (앞머리 글머리 기호 제거)
+const recLines=t=>String(t||'').split('\n').map(x=>x.replace(/^\s*(?:[-•·*]|\d+[.)]|[①-⑳])\s*/,'').trim()).filter(Boolean);
+// 분류 › 주요 업무(목표일정) › 한 일·할 일 원문. 날짜는 목표일정에만 표기
+function catBody(F,pick,empty){
+  const L=[];let k=0;const groups=[...CATS,''];
+  groups.forEach(c=>{const gs=F.goals.filter(g=>(CATS.includes(g.cat)?g.cat:'')===c).map(g=>({g,ws:g.works.filter(pick)})).filter(x=>x.ws.some(w=>w.records.length));
+    if(!gs.length)return;
+    L.push(`${++k}) ${c||'미분류'}`);
+    gs.forEach(({g,ws},j)=>{L.push(`${circ(j)} ${g.title}${g.due?` (목표일정 ${ymdDot(g.due)})`:''}`);
+      const D=[],T=[];ws.forEach(w=>w.records.forEach(r=>{recLines(r.done).forEach(x=>D.push(`- 한 일 : ${x}`));recLines(r.todo).forEach(x=>T.push(`- 할 일 : ${x}`))}));
       L.push(...D,...T)})});
+  return L.length?L.join('\n'):empty;
+}
+// 4. 진행 사항 : 요약 없이 입력된 한 일·할 일 전부 수합 (Claude 요약 시에도 그대로 유지)
+function progressBody(F){
+  const L=[catBody(F,()=>true,'보고 기간에 입력된 업무 기록 없음')];let k=(L[0].match(/^\d+\)/gm)||[]).length;
   const shown=new Set(F.goals.flatMap(g=>g.works.filter(w=>w.records.length).map(w=>w.title+'|'+g.title)));
   const lateOut=F.overdue.filter(t=>!shown.has(t.title+'|'+t.goal));
-  if(lateOut.length){L.push(`${++k}) 기록 없는 완료일 경과 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (${t.status}, ${t.owner}, 완료일 ${md(t.due)})`))}
-  if(F.meetings.length){L.push(`${++k}) 회의 결정사항`);F.meetings.forEach((m,j)=>{L.push(`${circ(j)} ${m.title} (${md(m.date)})`);
-    ln(m.decisions).forEach(x=>L.push(`- ${x}`));ln(m.actions).forEach(x=>L.push(`- 후속 조치 : ${x}`))})}
-  return L.length?L.join('\n'):'보고 기간에 입력된 업무 기록 없음';
+  if(lateOut.length){L.push(`${++k}) 기록 없는 목표일정 경과 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (목표일정 ${ymdDot(t.due)})`))}
+  if(F.meetings.length){const M=[];F.meetings.forEach(m=>{recLines(m.decisions).forEach(x=>M.push(`- ${x}`));recLines(m.actions).forEach(x=>M.push(`- 후속 조치 : ${x}`))});
+    if(M.length)L.push(`${++k}) 회의 결정사항`,...M)}
+  return L.join('\n');
 }
 function draftReport(title,s,e,member){
   const F=collectFacts(s,e,member);
@@ -692,12 +697,8 @@ function draftReport(title,s,e,member){
   const sec=[];
   sec.push({title:'1. 보고 개요',body:[`① 보고 기간 : ${pLabel} (${F.period.days}일)`,`② 대상 : ${member==='all'?'TF 전원':nameOf(member)} (기록 인원 ${F.members}명)`,`③ 업무 집계 기준 : 업무 기록일·진행 업무 완료일, 회의 일자 기준`,`④ 실적 집계 기준 : ${e.slice(0,4)}년 1월 ~ ${+e.slice(5,7)}월 (Dashboard_DV 월별 집계)`].join('\n')});
   sec.push({title:'2. 실적',body:MT.body,tables:MT.tables});
-  // 3. 주요 성과 : 완료된 진행 업무 요약 (Claude 요약 시 문장으로 정리)
-  {const L=[];let i=0;F.goals.forEach(g=>{const ds=g.works.filter(w=>w.status===ST.done);if(!ds.length)return;
-      L.push(`${++i}) ${g.cat?'['+g.cat+'] ':''}${g.title}${g.status===ST.done?' (목표 달성)':''}`);
-      ds.forEach((w,j)=>{L.push(`${circ(j)} ${w.title} (완료${w.due?' '+md(w.due):''}, ${w.owner})`);
-        const dn=w.records.flatMap(r=>firstLines(r.done,99));if(dn.length)L.push(`- ${clip(dn.slice(-3).join(', '),160)}${dn.length>3?` 외 ${dn.length-3}건`:''}`)})});
-    sec.push({title:'3. 주요 성과',body:L.length?L.join('\n'):'보고 기간에 완료된 진행 업무 없음'});}
+  // 3. 주요 성과 : 완료된 진행 업무의 기록 (Claude 요약 시 문장으로 정리)
+  sec.push({title:'3. 주요 성과',body:catBody(F,w=>w.status===ST.done,'보고 기간에 완료된 진행 업무 없음')});
   sec.push({title:'4. 진행 사항',body:progressBody(F)});
 
 
