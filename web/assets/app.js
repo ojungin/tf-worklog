@@ -652,25 +652,28 @@ function buildMetrics(M,e){
 // 규칙 기반 초안 (AI 미사용 시)
 // 기록 원문 → 줄 목록 (앞머리 글머리 기호 제거)
 const recLines=t=>String(t||'').split('\n').map(x=>x.replace(/^\s*(?:[-•·*]|\d+[.)]|[①-⑳])\s*/,'').trim()).filter(Boolean);
-// 분류 › 주요 업무(목표일정) › 한 일·할 일 원문. 날짜는 목표일정에만 표기
+// [분류] › 1. 주요 업무 › 1) 진행 업무 › 한 일 (1)… / 할 일 (1)…  (기록 원문 그대로)
+const stDue=(st,due)=>{const x=[st,due?'완료일 '+md(due):''].filter(Boolean).join(', ');return x?` (${x})`:''};
 function catBody(F,pick,empty){
-  const L=[];let k=0;const groups=[...CATS,''];
-  groups.forEach(c=>{const gs=F.goals.filter(g=>(CATS.includes(g.cat)?g.cat:'')===c).map(g=>({g,ws:g.works.filter(pick)})).filter(x=>x.ws.some(w=>w.records.length));
+  const L=[];const groups=[...CATS,''];
+  groups.forEach(c=>{const gs=F.goals.filter(g=>(CATS.includes(g.cat)?g.cat:'')===c).map(g=>({g,ws:g.works.filter(w=>pick(w)&&w.records.length)})).filter(x=>x.ws.length);
     if(!gs.length)return;
-    L.push(`${++k}) ${c||'미분류'}`);
-    gs.forEach(({g,ws},j)=>{L.push(`${circ(j)} ${g.title}${g.due?` (목표일정 ${ymdDot(g.due)})`:''}`);
-      const D=[],T=[];ws.forEach(w=>w.records.forEach(r=>{recLines(r.done).forEach(x=>D.push(`- 한 일 : ${x}`));recLines(r.todo).forEach(x=>T.push(`- 할 일 : ${x}`))}));
-      L.push(...D,...T)})});
+    if(L.length)L.push('');L.push(`[${c||'미분류'}]`);
+    gs.forEach(({g,ws},gi)=>{L.push(`${gi+1}. ${g.title}${stDue(g.status,g.due)}`);
+      ws.forEach((w,wi)=>{L.push(`${wi+1}) ${w.title}${stDue(w.status+(w.overdue?'·경과':''),w.due)}`);
+        const D=w.records.flatMap(r=>recLines(r.done)),T=w.records.flatMap(r=>recLines(r.todo));
+        if(D.length){L.push('한 일');D.forEach((x,i)=>L.push(`(${i+1}) ${x}`))}
+        if(T.length){L.push('할 일');T.forEach((x,i)=>L.push(`(${i+1}) ${x}`))}})})});
   return L.length?L.join('\n'):empty;
 }
 // 4. 진행 사항 : 요약 없이 입력된 한 일·할 일 전부 수합 (Claude 요약 시에도 그대로 유지)
 function progressBody(F){
-  const L=[catBody(F,()=>true,'보고 기간에 입력된 업무 기록 없음')];let k=(L[0].match(/^\d+\)/gm)||[]).length;
+  const L=[catBody(F,()=>true,'보고 기간에 입력된 업무 기록 없음')];
   const shown=new Set(F.goals.flatMap(g=>g.works.filter(w=>w.records.length).map(w=>w.title+'|'+g.title)));
   const lateOut=F.overdue.filter(t=>!shown.has(t.title+'|'+t.goal));
-  if(lateOut.length){L.push(`${++k}) 기록 없는 목표일정 경과 업무 (${lateOut.length}건)`);lateOut.forEach((t,j)=>L.push(`${circ(j)} ${t.title} (목표일정 ${ymdDot(t.due)})`))}
-  if(F.meetings.length){const M=[];F.meetings.forEach(m=>{recLines(m.decisions).forEach(x=>M.push(`- ${x}`));recLines(m.actions).forEach(x=>M.push(`- 후속 조치 : ${x}`))});
-    if(M.length)L.push(`${++k}) 회의 결정사항`,...M)}
+  if(lateOut.length){L.push('','[기록 없는 완료일 경과 업무]');lateOut.forEach((t,j)=>L.push(`(${j+1}) ${t.goal?t.goal+' › ':''}${t.title}${stDue(t.status,t.due)}`))}
+  if(F.meetings.length){const M=[];F.meetings.forEach(m=>{recLines(m.decisions).forEach(x=>M.push(x));recLines(m.actions).forEach(x=>M.push('후속 조치 : '+x))});
+    if(M.length){L.push('','[회의 결정사항]');M.forEach((x,j)=>L.push(`(${j+1}) ${x}`))}}
   return L.join('\n');
 }
 function draftReport(title,s,e,member){
@@ -712,9 +715,13 @@ function draftReport(title,s,e,member){
 }
 
 // 본문 표기 → HTML
-function bodyHtml(text){
+function bodyHtml(text){let deep=false;
   return String(text||'').split('\n').map(l=>{const t=l.trim();if(!t)return '<div class="rb-gap"></div>';
-    if(/^\d+\)\s*/.test(t))return `<p class="rb-sub">${esc(t)}</p>`;
+    if(/^\[[^\]]+\]$/.test(t)){deep=true;return `<p class="rb-cat">${esc(t)}</p>`}
+    if(/^\d+\.\s/.test(t)){deep=true;return `<p class="rb-goal">${esc(t)}</p>`}
+    if(/^\d+\)\s*/.test(t))return `<p class="${deep?'rb-work':'rb-sub'}">${esc(t)}</p>`;
+    if(/^(한 일|할 일)$/.test(t))return `<p class="rb-lbl">${esc(t)}</p>`;
+    if(/^\(\d+\)/.test(t))return `<p class="rb-item">${esc(t)}</p>`;
     if(/^[①-⑳]/.test(t))return `<p class="rb-num">${esc(t)}</p>`;
     if(/^[-•]\s*/.test(t))return `<p class="rb-bul">${esc(t.replace(/^[-•]\s*/,''))}</p>`;
     if(/^※/.test(t))return `<p class="rb-note">${esc(t)}</p>`;
@@ -762,7 +769,7 @@ function editHtml(d){
     <div class="g2"><div class="field"><label for="re_date">보고일 줄</label><input class="input" id="re_date" value="${esc(d.dateLine||'')}"></div>
       <div class="field"><label for="re_meta">기간·대상 줄</label><input class="input" id="re_meta" value="${esc(d.metaLine||'')}"></div></div>
     <div class="field"><label for="re_sum">■ 보고요약 (한 줄에 한 항목, 번호는 자동)</label>${ta('re_sum',(d.summary||[]).join('\n'),6)}</div>
-    <p class="re-hint">본문 표기 : <b>1) 소제목</b> · <b>① 번호 항목</b> · <b>- 하위 항목</b> · <b>※ 주석</b> · 그 외는 일반 문단</p>
+    <p class="re-hint">본문 표기 : <b>[분류]</b> · <b>1. 주요 업무</b> · <b>1) 소제목·진행 업무</b> · <b>한 일 / 할 일</b> · <b>(1) 항목</b> · <b>① 번호 항목</b> · <b>- 하위 항목</b> · <b>※ 주석</b> · 그 외는 일반 문단</p>
     ${(d.sections||[]).map((s,i)=>`<section class="re-sec"><div class="re-sech"><input class="input re-st" id="re_st_${i}" data-sec="${i}" value="${esc(s.title)}" aria-label="섹션 제목">
       <button class="iconbtn" data-secup="${i}" aria-label="위로" ${i===0?'disabled':''}>↑</button><button class="iconbtn" data-secdn="${i}" aria-label="아래로" ${i===d.sections.length-1?'disabled':''}>↓</button><button class="btn sm danger" data-secdel="${i}">섹션 삭제</button></div>
       ${ta('re_sb_'+i,s.body,Math.min(18,Math.max(4,String(s.body).split('\n').length+1)))}
@@ -922,12 +929,16 @@ async function exportDocx(r){
   const sums=(r.summary||[]).filter(x=>String(x).trim());
   if(sums.length)kids.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[new TableCell({borders,shading:{type:ShadingType.CLEAR,color:'auto',fill:G},margins:{top:120,bottom:120,left:160,right:160},
     children:[para('■ 보고요약',{bold:true,after:100}),...sums.map((x,i)=>para(`${i+1}. ${x}`,{after:80,indent:{left:300,hanging:300}}))]})]})]}));
-  const bodyParas=text=>String(text||'').split('\n').map(l=>{const t=l.trim();if(!t)return para('',{after:40});
-    if(/^\d+\)\s*/.test(t))return para(t,{bold:true,before:120,after:60});
+  const bodyParas=text=>{let deep=false;return String(text||'').split('\n').map(l=>{const t=l.trim();if(!t)return para('',{after:40});
+    if(/^\[[^\]]+\]$/.test(t)){deep=true;return para(t,{bold:true,before:160,after:60})}
+    if(/^\d+\.\s/.test(t)){deep=true;return para(t,{bold:true,before:100,after:40,indent:{left:200}})}
+    if(/^\d+\)\s*/.test(t))return deep?para(t,{bold:true,before:60,after:40,indent:{left:500}}):para(t,{bold:true,before:120,after:60});
+    if(/^(한 일|할 일)$/.test(t))return para(t,{bold:true,color:'1F4E8C',after:20,indent:{left:800}});
+    if(/^\(\d+\)/.test(t))return para(t,{indent:{left:1300,hanging:380}});
     if(/^[①-⑳]/.test(t))return para(t,{indent:{left:400,hanging:280}});
     if(/^[-•]\s*/.test(t))return para('· '+t.replace(/^[-•]\s*/,''),{indent:{left:700,hanging:200}});
     if(/^※/.test(t))return para(t,{size:17,color:'555555',indent:{left:400}});
-    return para(t,{indent:{left:200}})});
+    return para(t,{indent:{left:200}})})};
   const tbl=t=>{const sz=t.head.length>10?14:t.head.length>7?16:18,numc=t.head.length>4;
     const cell=(txt,head,ci)=>new TableCell({borders,shading:head?{type:ShadingType.CLEAR,color:'auto',fill:G}:undefined,margins:{top:30,bottom:30,left:50,right:50},
       children:[new Paragraph({alignment:head?AlignmentType.CENTER:(numc&&ci>1?AlignmentType.RIGHT:undefined),children:[run(String(txt??''),{size:sz,bold:head})]})]});
